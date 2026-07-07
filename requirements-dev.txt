@@ -1,0 +1,10 @@
+# Dev-only deps: notebook <-> .ipynb conversion, execution, and the Jupyter
+# kernel Quarto renders through. Not needed to just run wheel_speed_minimal_example.py.
+-r requirements.txt
+
+jupytext>=1.16
+ipykernel
+nbclient
+nbconvert
+jupyter-client
+nbformat

@@ -8,8 +8,8 @@
 # This example walks through a minimal training pipeline for **decoding behavior**
 # from spiking activity recorded in the **mouse brain with Neuropixels probes**,
 # using a single session of the IBL Brain-Wide Map. Each session records many
-# behavioral signals on a shared clock (wheel motion, whisker motion energy, and paw
-# positions/speeds), any of which can be a decoding target.
+# behavioral signals on a shared clock (wheel motion, whisker motion energy, paw
+# positions/speeds, and licks), any of which can be a decoding target.
 #
 # <!-- TODO: check how many Neuropixels probes were inserted for this session -->
 #
@@ -38,9 +38,10 @@
 #
 # This folder is self-contained. The session is produced **by the brainset
 # pipeline copied alongside this script** (`ibl_brain_wide_map_2025/`), written
-# into the local `processed/` directory. The pipeline processes exactly the single
-# eid listed in `ibl_brain_wide_map_2025/recording_ids.txt`. To (re)download and
-# process it, run from this folder:
+# into the local `processed/` directory. The pipeline processes exactly the eids
+# listed in `ibl_brain_wide_map_2025/eval_eids.txt`, which has been trimmed to
+# the single session used here (the full lists are kept as `*.full.txt.bak`). To
+# (re)download and process it, run from this folder:
 #
 # ```bash
 # brainsets prepare ./ibl_brain_wide_map_2025 --local \
@@ -48,9 +49,9 @@
 # ```
 #
 # This downloads the raw IBL session via the ONE API and processes it into
-# `processed/ibl_brain_wide_map_2025/<recording_id>.h5` (no unit QC filtering by
-# default). Requires ONE API credentials; the raw download is ~5.5 GB and the
-# processed h5 ~1.8 GB.
+# `processed/ibl_brain_wide_map_2025/<recording_id>.h5` (TS1 defaults: no
+# QC filtering). Requires ONE API credentials; the raw download is ~5.5 GB and
+# the processed h5 ~1.8 GB. See this folder's `README.md` for details.
 
 # %%
 # Running in Google Colab: clone this repo and install its pinned deps first.
@@ -105,8 +106,8 @@ EPOCHS = 200
 LR = 1e-4
 NUM_WORKERS = 16  # set high for a many-core machine; on Colab (~2 vCPUs) use 2
 
-# Which session to decode. This folder's pipeline downloads exactly this
-# session (see recording_ids.txt); the h5 lands under DATA_ROOT below.
+# Which eval session to decode. This folder's pipeline downloads exactly this
+# session (see one_session_eid.txt); the h5 lands under DATA_ROOT below.
 DATA_ROOT = os.path.join(_HERE, "processed")
 RECORDING_ID = "0802ced5-33a3-405e-8336-b65ebc5cb07c"
 
@@ -121,7 +122,7 @@ print(f"Using device: {device}")
 # Before building the dataset, let's see what a `brainsets` recording actually
 # *is*. Each session is a single, lazily-loaded object that holds every modality
 # on one shared time axis: the spikes of all recorded neurons, plus behavioral
-# covariates (wheel, whisker, paws) and the trial structure.
+# covariates (wheel, whisker, paws, licks) and the trial structure.
 #
 # **Materialize vs. load.** `brainsets prepare` converts the raw IBL session into
 # one HDF5 file on disk (~1.9 GB for this session). We never load all of that:
@@ -135,11 +136,13 @@ from torch_brain.utils import bin_spikes
 from dataset import IBLBrainWideMap2025
 
 # The base class handles file I/O; here we open the session just to explore it.
-viz_ds = IBLBrainWideMap2025(root=DATA_ROOT, recording_ids=RECORDING_ID, split=None)
+viz_ds = IBLBrainWideMap2025(
+    root=DATA_ROOT, recording_ids=RECORDING_ID, split=None
+)
 viz_rec = viz_ds.get_recording(RECORDING_ID)
 T_END = float(viz_rec.domain.end[-1])
 print(f"Session length: {T_END:.0f} s ({T_END / 60:.0f} min)")
-print(f"Neurons: {len(viz_rec.units.id)}  |  covariates: wheel, whisker, paws")
+print(f"Neurons: {len(viz_rec.units.id)}  |  covariates: wheel, whisker, paws, licks")
 
 # %% [markdown]
 # ### The full session and its causal split
@@ -334,7 +337,7 @@ plt.show()
 # (If you swap in another covariate as the target, normalization may matter.)
 #
 # **Unfiltered vs. filtered units.** The recording ships with *all*
-# recorded units (no QC filtering by default). We move to the **filtered**
+# recorded units (the TS1 default: no QC filtering). We move to the **filtered**
 # set here via a `UnitFilter` transform that keeps only good-quality units:
 # `label == 1.0` (KiloSort "good") AND `firing_rate >= 1 Hz` AND
 # `qc_neural == PASS` (probe QC). For this session that is **1547 -> 358 units**.
@@ -372,6 +375,8 @@ class SimpleIBLWheelSpeedDataset(IBLBrainWideMap2025):
         recording_id: str,
         filter_units: bool = True,
     ):
+        # recording_ids picks which session to load. TS1-style tasks are single-session
+        # and live in the "eval" regime of the dataset.
         assert split in ("train", "val", "test")
         super().__init__(
             root=root,
@@ -846,7 +851,9 @@ from torch_brain.samplers import RandomFixedWindowSampler
 from torch_brain.transforms import Compose, RandomCrop, UnitDropout
 
 # a clean recording handle + one real sampling window to demo on
-demo_ds = IBLBrainWideMap2025(root=DATA_ROOT, recording_ids=RECORDING_ID, split=None)
+demo_ds = IBLBrainWideMap2025(
+    root=DATA_ROOT, recording_ids=RECORDING_ID, split=None
+)
 demo_rec = demo_ds.get_recording(RECORDING_ID)
 demo_iv = (
     demo_rec.task_aligned_intervals.domain

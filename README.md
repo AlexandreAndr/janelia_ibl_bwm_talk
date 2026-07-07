@@ -14,8 +14,10 @@ decoders (Linear, GRU, TCN). Everything it needs lives in this folder.
 | `data/recording_ids.txt` | Recording-id list read by `dataset.py`, holding the single session used here. |
 | `ibl_brain_wide_map_2025/` | The brainset pipeline, copied as-is. Its `recording_ids.txt` holds only the single session used here. |
 | `processed/` | Where the pipeline writes the processed `.h5` (download target). |
-| `requirements.txt` | Pinned dependency list for this folder, installable with plain `pip`. |
+| `requirements.txt` | Pinned runtime dependency list, installable with plain `pip`. |
+| `requirements-dev.txt` | Adds notebook/Quarto tooling (jupytext, nbconvert, ipykernel) on top of `requirements.txt`. |
 | `jupytext.toml` | Pairing config that keeps the `.py` and `.ipynb` in sync. |
+| `preview.sh` | One-command sync + re-execute + live Quarto preview (see [Building docs with Quarto](#building-docs-with-quarto)). |
 
 The script imports the vendored `dataset.py` (no dependency on the repo's
 `src/core`) and reads the session from the local `processed/` directory.
@@ -29,6 +31,13 @@ This folder has its own isolated virtualenv, independent of the repo's top-level
 python -m venv .venv
 source .venv/bin/activate       # .venv\Scripts\activate on Windows
 pip install -r requirements.txt
+```
+
+To also edit/sync the notebook or render docs with Quarto, install the dev extras
+instead (superset of `requirements.txt`):
+
+```bash
+pip install -r requirements-dev.txt
 ```
 
 Running the notebook in Google Colab instead? The first cell clones this repo
@@ -120,3 +129,14 @@ from an isolated dir so folding is preserved):
 
 Then open <http://localhost:8080/>. To author a `.qmd` version instead,
 `quarto convert wheel_speed_minimal_example.ipynb`.
+
+### All-in-one: `preview.sh`
+
+`preview.sh` chains the three steps above into one command: `jupytext --sync`,
+re-execute the notebook, then `build.sh --preview`. It bootstraps `.venv` from
+`requirements-dev.txt` via `uv` if the venv doesn't exist yet.
+
+```bash
+./preview.sh              # sync, re-execute, preview
+./preview.sh --no-execute # sync only, skip re-running the notebook
+```
