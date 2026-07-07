@@ -1,0 +1,60 @@
+name: Render Quarto & deploy to GitHub Pages
+
+# Renders the notebook to HTML and publishes it to GitHub Pages.
+#
+# IMPORTANT: CI does NOT execute the notebook. It has no ONE API credentials,
+# none of the ~7 GB of raw/processed data, and no GPU. Instead it renders with
+# `--no-execute`, reusing the cell outputs baked into the committed .ipynb. So
+# the deployed site reflects the last *locally executed* run of the notebook.
+# To refresh the results, re-run the notebook locally, commit the .ipynb, push.
+
+on:
+  push:
+    branches: [main]
+    # Only rebuild when something that affects the render changes.
+    paths:
+      - "wheel_speed_minimal_example.ipynb"
+      - "_quarto.yml"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; cancel in-progress runs for newer pushes.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      # build.sh renders in an isolated dir (no sibling .py) so Quarto uses the
+      # notebook's baked-in outputs and keeps code folding. It writes _site/ with
+      # both wheel_speed_minimal_example.html and an index.html copy at the root.
+      - name: Build site
+        run: ./build.sh
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

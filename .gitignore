@@ -1,0 +1,23 @@
+# isolated uv environment (uv.lock IS committed, for reproducible `uv sync`)
+.venv/
+__pycache__/
+
+# downloaded / processed data (regenerable via `brainsets prepare`)
+raw/
+processed/
+
+# logs
+*.log
+
+# quarto / notebook render artifacts
+/_quarto_test.html
+/wheel_speed_minimal_example.html
+/_site/
+/_freeze/
+/.build/
+*_files/
+.quarto/
+.ipynb_checkpoints/
+
+/.quarto/
+**/*.quarto_ipynb

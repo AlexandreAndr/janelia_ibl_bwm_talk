@@ -1,0 +1,4 @@
+# Pair the percent-format .py script with an .ipynb notebook so edits to either
+# stay in sync via `jupytext --sync <file>`. The .py remains the source of truth
+# for diffs/review; the .ipynb is the runnable/renderable copy (Jupyter, Quarto).
+formats = "py:percent,ipynb"

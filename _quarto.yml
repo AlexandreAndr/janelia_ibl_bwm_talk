@@ -1,0 +1,27 @@
+project:
+  type: default
+  output-dir: _site
+  render:
+    - wheel_speed_minimal_example.ipynb
+
+# The notebook is committed WITH its cell outputs already baked in (execute it
+# locally once via `jupyter nbconvert --execute --inplace`, then commit). Quarto
+# must NOT re-execute it: there is no data/GPU on CI, and re-running would retrain
+# the model. `enabled: false` makes Quarto render straight from the baked-in
+# outputs. NOTE: render in a directory that does NOT contain the paired .py
+# sibling (see build.sh), otherwise Quarto renders the output-less script and
+# code folding is lost.
+execute:
+  enabled: false
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    code-tools: true
+    embed-resources: true
+    fig-width: 8
+    fig-height: 4.5
