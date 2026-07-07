@@ -14,7 +14,7 @@ decoders (Linear, GRU, TCN). Everything it needs lives in this folder.
 | `data/recording_ids.txt` | Recording-id list read by `dataset.py`, holding the single session used here. |
 | `ibl_brain_wide_map_2025/` | The brainset pipeline, copied as-is. Its `recording_ids.txt` holds only the single session used here. |
 | `processed/` | Where the pipeline writes the processed `.h5` (download target). |
-| `pyproject.toml` | Isolated dependency spec for this folder (managed with `uv`). |
+| `requirements.txt` | Pinned dependency list for this folder, installable with plain `pip`. |
 | `jupytext.toml` | Pairing config that keeps the `.py` and `.ipynb` in sync. |
 
 The script imports the vendored `dataset.py` (no dependency on the repo's
@@ -23,19 +23,17 @@ The script imports the vendored `dataset.py` (no dependency on the repo's
 ## Environment
 
 This folder has its own isolated virtualenv, independent of the repo's top-level
-`venv`. It is managed with [uv](https://docs.astral.sh/uv/) and pins the same
-dependency versions as the global project (`../pyproject.toml`), minus the heavy
-extras the notebook never imports (xformers, ray[tune], wandb, hydra, cebra,
-npyx). From this folder:
+`venv`. From this folder:
 
 ```bash
-uv sync            # creates ./.venv and installs the pinned deps
+python -m venv .venv
+source .venv/bin/activate       # .venv\Scripts\activate on Windows
+pip install -r requirements.txt
 ```
 
-`torch` resolves to the same build as the parent project (CUDA `2.10.0+cu128` on
-a GPU host); `uv` hardlinks wheels from its shared cache, so this does not
-duplicate gigabytes on disk. Run anything in the env with `uv run <cmd>` or by
-activating `./.venv`.
+Running the notebook in Google Colab instead? The first cell clones this repo
+and installs `requirements.txt` for you: just click the "Open In Colab" badge
+at the top of the notebook.
 
 ## Download the session
 
@@ -63,7 +61,7 @@ To process a different session instead, put its eid on a line in
 ## Run the example
 
 ```bash
-uv run python wheel_speed_minimal_example.py
+python wheel_speed_minimal_example.py
 ```
 
 Or open `wheel_speed_minimal_example.ipynb` in Jupyter using the `./.venv` kernel.
@@ -75,13 +73,13 @@ The `.py` (jupytext percent format) and `.ipynb` are **paired** via
 `.ipynb` is the runnable/renderable copy. After editing either, sync the other:
 
 ```bash
-uv run jupytext --sync wheel_speed_minimal_example.py    # or the .ipynb
+jupytext --sync wheel_speed_minimal_example.py    # or the .ipynb
 ```
 
 Regenerate the `.ipynb` from scratch if needed:
 
 ```bash
-uv run jupytext --to ipynb wheel_speed_minimal_example.py
+jupytext --to ipynb wheel_speed_minimal_example.py
 ```
 
 ## Building docs with Quarto
@@ -97,7 +95,7 @@ then use `build.sh` to render:
 # 1. Execute the notebook in place (populates cell outputs; ~a couple minutes).
 #    Re-run this whenever the code changes, then commit the .ipynb.
 QUARTO_PYTHON="$PWD/.venv/bin/python" \
-  uv run jupyter nbconvert --to notebook --execute --inplace \
+  jupyter nbconvert --to notebook --execute --inplace \
   wheel_speed_minimal_example.ipynb
 
 # 2. Build the self-contained site into ./_site (open _site/index.html).

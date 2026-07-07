@@ -53,11 +53,37 @@
 # processed h5 ~1.8 GB.
 
 # %%
-# Make this folder importable so `from dataset import IBLBrainWideMap2025`
-# resolves the vendored dataset class next to this script.
+# Running in Google Colab: clone this repo and install its pinned deps first.
+# Colab starts from a blank runtime, so it has neither `dataset.py` / the
+# vendored pipeline nor the packages this notebook needs.
 import os
+import subprocess
 import sys
 
+try:
+    import google.colab  # noqa: F401
+
+    IN_COLAB = True
+except ImportError:
+    IN_COLAB = False
+
+if IN_COLAB:
+    REPO_DIR = "janelia_ibl_bwm_talk"
+    if not os.path.isdir(REPO_DIR):
+        subprocess.run(
+            ["git", "clone", "--depth", "1",
+             "https://github.com/AlexandreAndr/janelia_ibl_bwm_talk.git", REPO_DIR],
+            check=True,
+        )
+    os.chdir(REPO_DIR)
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"],
+        check=True,
+    )
+
+# %%
+# Make this folder importable so `from dataset import IBLBrainWideMap2025`
+# resolves the vendored dataset class next to this script.
 _HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
