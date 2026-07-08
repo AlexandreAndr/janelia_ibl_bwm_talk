@@ -937,7 +937,6 @@ plt.show()
 
 
 # %% [markdown]
-# ---
 # # Hands On: Decode a Different Covariate
 #
 # Now it's your turn. Everything you need is already defined above: the dataset
