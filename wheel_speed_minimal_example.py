@@ -185,7 +185,7 @@ print(f"Using device: {device}")
 from pathlib import Path
 from typing import Literal, TypeAlias, get_args
 
-from torch_brain.dataset import Dataset, DatasetIndex, SpikingDatasetMixin
+from torch_brain.datasets import Dataset, DatasetIndex, SpikingDatasetMixin
 from torch_brain.transforms import UnitFilter
 from torch_brain.utils import bin_spikes
 
@@ -356,42 +356,45 @@ splits = {
     "val": (viz_rec.val_domain, "#DD8452"),
     "test": (viz_rec.test_domain, "#55A868"),
 }
-ti = viz_rec.task_aligned_intervals.domain  # 1.0 s task-aligned trial windows
+ti = viz_rec.task_aligned_intervals.domain  # used only to bound the x-axis on the first/last trial
 mi = viz_rec.task_aligned_intervals.movement_intervals
 
-fig, ax = plt.subplots(figsize=(10, 2.8))
+x_start = float(ti.start[0])
+x_end = float(ti.end[-1])
+
+fig, ax = plt.subplots(figsize=(10, 2.4))
+bar_ymin, bar_ymax = 0.55, 0.95
 for name, (dom, color) in splits.items():
     for s, e in zip(np.asarray(dom.start), np.asarray(dom.end)):
-        ax.axvspan(s, e, ymin=0.70, ymax=0.98, color=color, alpha=0.85)
-    mid = (float(dom.start[0]) + float(dom.end[-1])) / 2
-    ax.text(mid, 1.04, name, ha="center", va="bottom", color=color, fontweight="bold")
-# task-aligned trial windows: where the decision-making task actually occurs
-ax.vlines(np.asarray(ti.start), 0.38, 0.62, color="#8172B3", lw=0.3, alpha=0.7)
-ax.text(
-    0,
-    0.66,
-    f"{len(ti.start)} task trials",
-    ha="left",
-    va="bottom",
-    fontsize=8,
-    color="#8172B3",
-)
+        ax.axvspan(s, e, ymin=bar_ymin, ymax=bar_ymax, color=color, alpha=0.85)
+    vis_start = max(x_start, float(dom.start[0]))
+    vis_end = min(x_end, float(dom.end[-1]))
+    mid = (vis_start + vis_end) / 2
+    ax.text(
+        mid,
+        (bar_ymin + bar_ymax) / 2,
+        name,
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+    )
 # movement windows: the subset used as decoding samples
-ax.vlines(np.asarray(mi.start), 0.05, 0.29, color="k", lw=0.3, alpha=0.5)
+ax.vlines(np.asarray(mi.start), 0.05, 0.35, color="k", lw=0.3, alpha=0.5)
 ax.text(
-    0,
-    0.33,
+    x_start,
+    0.40,
     f"{len(mi.start)} movement windows (1.0 s samples)",
     ha="left",
     va="bottom",
     fontsize=8,
 )
-ax.set_xlim(0, T_END)
-ax.set_ylim(0.0, 1.15)
+ax.set_xlim(x_start, x_end)
+ax.set_ylim(0.0, 1.0)
 ax.set_yticks([])
 ax.set_xlabel("Time in session (s)")
 ax.set_title(
-    f"One continuous {T_END / 60:.0f}-min session: causal train/val/test split"
+    f"{(x_end - x_start) / 60:.0f}-min task epoch: causal train/val/test split"
 )
 plt.tight_layout()
 plt.show()
