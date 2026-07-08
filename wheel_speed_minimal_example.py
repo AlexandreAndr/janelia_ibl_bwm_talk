@@ -41,32 +41,30 @@
 # ## Setup
 #
 # Neuroscience datasets are usually distributed through a lab- or
-# consortium-specific API — here, the IBL's own **ONE API**. `brainsets` is a
+# consortium-specific API, here the IBL's own **ONE API**. `brainsets` is a
 # pipeline that wraps around that native access pattern: it downloads the raw
 # session and converts it into the standardized HDF5 format that `torch-brain`
 # datasets expect. The pipeline used for a given dataset can be one shared by
-# the community (like `ibl_brain_wide_map_2025/`, copied alongside this
-# notebook) or your own local, private one, if the dataset isn't public.
+# [the community](https://github.com/neuro-galaxy/torch_brain/tree/main/torch_brain/pipeline/brainsets-pipelines),
+# or your own local, private one, kept outside that shared collection because
+# it's just an example, processes a private dataset, applies custom
+# processing, or is still in development.
 #
-# To (re)download and process the session used in this tutorial from scratch,
-# run from this folder:
-#
-# ```bash
-# brainsets prepare ./ibl_brain_wide_map_2025 --local \
-#   --processed-dir ./processed --raw-dir ./raw
-# ```
-#
-# This requires ONE API credentials, and downloads/processes ~5.5 GB of raw
-# data into a ~1.8 GB HDF5 file. For this tutorial we skip that step: the cells
-# below instead fetch the single, already-processed session straight from the
-# Hugging Face Hub (public, no login required), so you can get started in
-# seconds. See this folder's `README.md` for more details.
+# This tutorial's own pipeline,
+# [`ibl_brain_wide_map_2025`](https://github.com/AlexandreAndr/janelia_ibl_bwm_talk/tree/main/ibl_brain_wide_map_2025),
+# falls in that latter category: a plain-Python `brainsets` pipeline kept
+# alongside this notebook as a worked example of the real flow, for anyone
+# curious how a raw IBL session gets turned into the standardized HDF5 format.
+# Running it requires ONE API credentials and downloads/processes ~5.5 GB of
+# raw data into a ~1.8 GB HDF5 file. For this tutorial we skip that step: the
+# cells below instead fetch the single, already-processed session straight
+# from the Hugging Face Hub (public, no login required), so you can get
+# started in seconds. See this folder's `README.md` for more details.
 #
 
 # %% [markdown]
 # **If running in Colab:** install this notebook's pinned dependencies
-# that aren't already preinstalled. The session data itself is fetched
-# separately below, so no repo checkout is required.
+# that aren't already preinstalled.
 #
 
 # %%
@@ -146,6 +144,7 @@ if not os.path.exists(_session_path):
 # tutorial.
 
 # %%
+#| code-fold: false
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -945,7 +944,7 @@ plt.show()
 # as `Y`**.
 #
 # **Goal:** instead of wheel speed, decode one of the other covariates recorded
-# in this session — `whisker.motion_energy`, `paws.left_paw_speed`, or
+# in this session: `whisker.motion_energy`, `paws.left_paw_speed`, or
 # `paws.right_paw_speed` (see "The behavioral covariates" above for what these
 # look like).
 #
@@ -964,6 +963,7 @@ plt.show()
 # (a finer bin size, a longer context window, unit dropout, ...) on your new
 # target.
 #
+
 
 # %%
 class IBLCovariateDataset(IBLBrainWideMap2025):

@@ -11,7 +11,7 @@ decoders (Linear, GRU, TCN). Everything it needs lives in this folder.
 | `wheel_speed_minimal_example.py` | The example, as a jupytext percent-format script (source of truth for diffs). |
 | `wheel_speed_minimal_example.ipynb` | The same notebook in `.ipynb` form, paired to the `.py` (see [Notebook formats](#notebook-formats)). |
 | `recording_ids.txt` | Recording-id list read by `IBLBrainWideMap2025` (defined in the script), holding the single session used here. |
-| `ibl_brain_wide_map_2025/` | The brainset pipeline, copied as-is. Its `recording_ids.txt` holds only the single session used here. |
+| [`ibl_brain_wide_map_2025/`](https://github.com/AlexandreAndr/janelia_ibl_bwm_talk/tree/main/ibl_brain_wide_map_2025) | This tutorial's own `brainsets` pipeline, kept local rather than in the [shared community pipelines](https://github.com/neuro-galaxy/torch_brain/tree/main/torch_brain/pipeline/brainsets-pipelines) because it's just an example for this tutorial. Its `recording_ids.txt` holds only the single session used here. |
 | `processed/` | Where the pipeline writes the processed `.h5` (download target). |
 | `requirements.txt` | Pinned runtime dependency list, installable with plain `pip`. |
 | `requirements-dev.txt` | Adds notebook/Quarto tooling (jupytext, nbconvert, ipykernel) on top of `requirements.txt`. |
@@ -42,7 +42,7 @@ pip install -r requirements-dev.txt
 Running the notebook in Google Colab instead? The first cell installs the
 pinned dependencies for you: just click the "Open In Colab" badge at the top
 of the notebook. A later cell then downloads the pre-processed session
-automatically (see [Download the session](#download-the-session)) — no repo
+automatically (see [Download the session](#download-the-session)): no repo
 checkout, manual steps, or ONE API credentials needed to just run the example.
 
 ## Download the session
@@ -52,13 +52,13 @@ By default, the notebook downloads the already-processed `.h5` (~1.9 GB) for
 [`AlexAndreUpenn/ibl-bwm-wheel-speed-demo`](https://huggingface.co/datasets/AlexAndreUpenn/ibl-bwm-wheel-speed-demo)
 dataset on the Hugging Face Hub, into
 `processed/ibl_brain_wide_map_2025/0802ced5-33a3-405e-8336-b65ebc5cb07c.h5`.
-This is what runs on Colab and is the fastest way to get started — it skips
+This is what runs on Colab and is the fastest way to get started: it skips
 the raw IBL download and the `brainsets` processing step entirely, and needs
 no credentials since the file is public. The notebook skips this download if
 the file already exists locally (e.g. from running the pipeline yourself).
 
-To (re)build the `.h5` from raw data yourself instead — e.g. to process a
-different session, or to pick up pipeline changes — the pipeline processes
+To (re)build the `.h5` from raw data yourself instead (e.g. to process a
+different session, or to pick up pipeline changes), the pipeline processes
 exactly the eid(s) listed in `ibl_brain_wide_map_2025/recording_ids.txt`. From
 this folder:
 

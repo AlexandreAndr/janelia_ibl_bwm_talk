@@ -21,3 +21,5 @@ processed/
 
 /.quarto/
 **/*.quarto_ipynb
+
+CLAUDE.md
