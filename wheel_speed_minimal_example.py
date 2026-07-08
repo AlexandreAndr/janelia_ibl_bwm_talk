@@ -79,7 +79,7 @@ if IN_COLAB:
             "pip",
             "install",
             "-q",
-            "torch-brain==.2.0",
+            "torch-brain==0.2.0",
             "tqdm",
             "huggingface_hub",
         ],

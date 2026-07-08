@@ -3,6 +3,6 @@
 # torch, scikit-learn, and matplotlib are intentionally left unpinned in
 # requirements-dev.txt instead: they're preinstalled on Colab, so no version
 # here is needed to run the notebook there.
-torch-brain==.2.0
+torch-brain==0.2.0
 tqdm
 huggingface_hub
