@@ -261,7 +261,15 @@ display(
 # Each accepts an x_range so several panels can be locked to one shared time axis.
 from bokeh.io import output_notebook, show
 from bokeh.layouts import column
-from bokeh.models import BoxZoomTool, ColumnDataSource, PanTool, Range1d, ResetTool, WheelZoomTool
+from bokeh.models import (
+    BoxZoomTool,
+    ColumnDataSource,
+    DatetimeTickFormatter,
+    PanTool,
+    Range1d,
+    ResetTool,
+    WheelZoomTool,
+)
 from bokeh.plotting import figure
 from bokeh.resources import INLINE
 
@@ -287,6 +295,19 @@ def _x_only_tools():
     return [pan, wheel_zoom, box_zoom, ResetTool()], pan, wheel_zoom
 
 
+def _time_only_formatter():
+    """Fresh datetime tick formatter showing clock time only, no month/day/year.
+
+    The x axis encodes elapsed time within a session (milliseconds since 0),
+    not a calendar date, so every scale is formatted as clock time.
+    """
+    return DatetimeTickFormatter(
+        microseconds="%H:%M:%S.%3N", milliseconds="%H:%M:%S.%3N", seconds="%H:%M:%S",
+        minsec="%H:%M:%S", minutes="%H:%M:%S", hourmin="%H:%M:%S", hours="%H:%M:%S",
+        days="%H:%M:%S", months="%H:%M:%S", years="%H:%M:%S",
+    )
+
+
 def plot_spikes(spikes, x_range=None, width=800, height=400):
     """Raster of an event stream, from spikes.timestamps and spikes.unit_index."""
     if x_range is None:
@@ -295,6 +316,7 @@ def plot_spikes(spikes, x_range=None, width=800, height=400):
     p = figure(x_axis_label="Time", y_axis_label="Unit index", width=width,
                height=height, x_axis_type="datetime", x_range=x_range, title="Spikes",
                tools=tools, active_drag=pan, active_scroll=wheel_zoom)
+    p.xaxis.formatter = _time_only_formatter()
     p.ygrid.grid_line_color = None
     p.yaxis.visible = False
     source = ColumnDataSource(data=dict(x=spikes.timestamps * 1e3, y=spikes.unit_index))
@@ -312,6 +334,7 @@ def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
     p = figure(x_axis_label="Time", y_axis_label=y_axis_label or field, width=width,
               height=height, x_axis_type="datetime", x_range=x_range,
               tools=tools, active_drag=pan, active_scroll=wheel_zoom)
+    p.xaxis.formatter = _time_only_formatter()
     p.axis.minor_tick_line_color = None
     x_values = data.timestamps * 1e3
     y_values = getattr(data, field)
@@ -337,6 +360,7 @@ def plot_intervals(*interval, x_range=None, title=None, width=800, height=200):
     p = figure(title=title, x_axis_label="Time", x_range=x_range, y_axis_label="Intervals",
                y_range=(-len(interval), 1), width=width, height=height, x_axis_type="datetime",
                tools=tools, active_drag=pan, active_scroll=wheel_zoom)
+    p.xaxis.formatter = _time_only_formatter()
     p.yaxis.visible = False
     p.grid.grid_line_color = None
     for i, iv in enumerate(interval):
