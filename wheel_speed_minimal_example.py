@@ -55,9 +55,10 @@
 
 # %%
 # Running in Google Colab: install this notebook's pinned deps first. Colab
-# starts from a blank runtime, so it has none of the packages this notebook
-# needs; the session data itself is fetched separately from Hugging Face Hub
-# below, so no repo checkout is required.
+# starts from a blank runtime, but already has torch, scikit-learn, and
+# matplotlib preinstalled, so only the packages it lacks need fetching; the
+# session data itself is fetched separately from Hugging Face Hub below, so
+# no repo checkout is required.
 import os
 import subprocess
 import sys
@@ -79,9 +80,6 @@ if IN_COLAB:
             "install",
             "-q",
             "torch-brain==.2.0",
-            "torch==2.10.0",
-            "scikit-learn==1.7.2",
-            "matplotlib",
             "tqdm",
             "huggingface_hub",
         ],

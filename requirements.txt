@@ -1,8 +1,8 @@
 # Runtime deps the notebook actually imports, pinned to match the global
 # project. torch-brain pulls numpy/pandas/h5py/tqdm/ray/rich transitively.
+# torch, scikit-learn, and matplotlib are intentionally left unpinned in
+# requirements-dev.txt instead: they're preinstalled on Colab, so no version
+# here is needed to run the notebook there.
 torch-brain==.2.0
-torch==2.10.0
-scikit-learn==1.7.2
-matplotlib
 tqdm
 huggingface_hub

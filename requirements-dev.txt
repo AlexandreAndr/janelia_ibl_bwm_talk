@@ -2,6 +2,12 @@
 # kernel Quarto renders through. Not needed to just run wheel_speed_minimal_example.py.
 -r requirements.txt
 
+# Unpinned here (Colab provides these preinstalled, so no version is pinned
+# in requirements.txt); local runs just get whatever's current.
+torch
+scikit-learn
+matplotlib
+
 jupytext>=1.16
 ipykernel
 nbclient
