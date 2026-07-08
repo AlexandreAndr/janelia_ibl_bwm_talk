@@ -517,9 +517,14 @@ class Pipeline(BrainsetPipeline):
         data.normalize = _get_beh_normalize(data, train_domain)
 
         # save data to disk
+        # Write to a temp path and rename into place: an atomic rename replaces
+        # the directory entry without touching the old inode, so this succeeds
+        # even if a reader (e.g. a notebook kernel) still has store_path open.
         self.update_status("Storing")
-        with h5py.File(store_path, "w") as file:
+        tmp_store_path = store_path.with_suffix(store_path.suffix + ".tmp")
+        with h5py.File(tmp_store_path, "w") as file:
             data.to_hdf5(file, serialize_fn_map=serialize_fn_map)
+        tmp_store_path.replace(store_path)
 
         try:
             one.save_cache()  # explicitly save before shutdown

@@ -47,7 +47,8 @@ checkout, manual steps, or ONE API credentials needed to just run the example.
 
 ## Download the session
 
-By default, the notebook downloads the already-processed `.h5` (~1.9 GB) for
+By default, the notebook downloads the already-processed `.h5` (~0.4 GB,
+already filtered to good-quality units) for
 `0802ced5-33a3-405e-8336-b65ebc5cb07c` straight from the
 [`AlexAndreUpenn/ibl-bwm-wheel-speed-demo`](https://huggingface.co/datasets/AlexAndreUpenn/ibl-bwm-wheel-speed-demo)
 dataset on the Hugging Face Hub, into
@@ -64,17 +65,23 @@ this folder:
 
 ```bash
 brainsets prepare ./ibl_brain_wide_map_2025 --local \
-  --processed-dir ./processed --raw-dir ./raw
+  --processed-dir ./processed --raw-dir ./raw \
+  --unit-filter probe_qc --unit-filter firing_rate --unit-filter unit_qc
 ```
 
 This downloads the raw IBL session via the ONE API and processes it into
-`processed/ibl_brain_wide_map_2025/0802ced5-33a3-405e-8336-b65ebc5cb07c.h5`
-with no unit QC filtering by default (the script applies its own `UnitFilter`).
+`processed/ibl_brain_wide_map_2025/0802ced5-33a3-405e-8336-b65ebc5cb07c.h5`.
+The three `--unit-filter` flags keep only good-quality units: `probe_qc`
+(probe passed QC), `firing_rate` (> 1 Hz), and `unit_qc` (KiloSort/IBL's own
+"good" label). Omit any of them to keep more units (e.g. no flags at all
+processes every recorded unit, 1547 for this session, instead of the 358
+good-quality ones).
 
 Requirements:
 - ONE API credentials configured (`~/.one/`).
 - A few GB free disk: the raw download for this session is ~5.5 GB (kept in
-  `raw/` unless you clean it yourself); the processed `.h5` is ~1.8 GB.
+  `raw/` unless you clean it yourself); the processed `.h5` is ~0.4 GB with
+  the unit filters above (~1.9 GB unfiltered).
 
 To process a different session instead, put its eid on a line in
 `ibl_brain_wide_map_2025/recording_ids.txt`, update `RECORDING_ID` in the

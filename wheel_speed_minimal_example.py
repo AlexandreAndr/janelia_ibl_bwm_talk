@@ -57,7 +57,8 @@
 # alongside this notebook as a worked example of the real flow, for anyone
 # curious how a raw IBL session gets turned into the standardized HDF5 format.
 # Running it downloads/processes ~5.5 GB of
-# raw data into a ~1.8 GB HDF5 file. For this tutorial we skip that step: the
+# raw data into a ~0.4 GB HDF5 file (already filtered to good-quality units,
+# see "Good units only" below). For this tutorial we skip that step: the
 # cells below instead fetch the single, already-processed session straight
 # from the Hugging Face Hub (public, no login required), so you can get
 # started in seconds. See this folder's `README.md` for more details.
@@ -124,9 +125,10 @@ RECORDING_ID = "0802ced5-33a3-405e-8336-b65ebc5cb07c"
 # the download if it's already on disk.
 
 # %%
-# Fetch the pre-processed session (~1.9 GB) from the Hugging Face Hub instead of
-# running the raw IBL download + brainsets pipeline (~5.5 GB raw + processing
-# time). Skips the download if the file is already present locally (e.g. you
+# Fetch the pre-processed session (~0.4 GB, already filtered to good-quality
+# units) from the Hugging Face Hub instead of running the raw IBL download +
+# brainsets pipeline (~5.5 GB raw + processing time). Skips the download if
+# the file is already present locally (e.g. you
 # ran `brainsets prepare` yourself). To (re)build it from scratch instead, see
 # this folder's README.
 _session_path = os.path.join(DATA_ROOT, DATASET_DIRNAME, f"{RECORDING_ID}.h5")
@@ -225,13 +227,14 @@ display(
 #   per-sample timestamps needed). Here: `wheel`, `whisker`, and `paws`, all at
 #   50 Hz.
 # - **`IrregularTimeSeries`** is a stream of events, each carrying its own
-#   timestamp. Here: `spikes`, 58.5 M spike times tagged with a `unit_index`.
+#   timestamp. Here: `spikes`, ~12.5 M spike times tagged with a `unit_index`.
 # - **`Interval`** is a set of labelled time segments, one `start` and `end` per
 #   row. Here: `trials` (424 of them), `movement_intervals`, and the `train`,
 #   `val`, and `test_domain` splits.
 # - **`ArrayDict`** is a table of per-item arrays sharing one axis. Here: `units`
-#   (1547 neurons, each with an `id`, a 3D `(x, y, z)` coordinate, a
-#   `region_cosmos` brain area, a `firing_rate`, and more) and `probes`.
+#   (358 neurons, already filtered to good quality, each with an `id`, a 3D
+#   `(x, y, z)` coordinate, a `region_cosmos` brain area, a `firing_rate`, and
+#   more) and `probes`.
 #
 # One detail to carry into the next section: every array above printed as a
 # `Lazy...` type. Nothing has been read from disk yet; the recording is still just
@@ -303,9 +306,16 @@ def _time_only_formatter():
     not a calendar date, so every scale is formatted as clock time.
     """
     return DatetimeTickFormatter(
-        microseconds="%H:%M:%S.%3N", milliseconds="%H:%M:%S.%3N", seconds="%H:%M:%S",
-        minsec="%H:%M:%S", minutes="%H:%M:%S", hourmin="%H:%M:%S", hours="%H:%M:%S",
-        days="%H:%M:%S", months="%H:%M:%S", years="%H:%M:%S",
+        microseconds="%H:%M:%S.%3N",
+        milliseconds="%H:%M:%S.%3N",
+        seconds="%H:%M:%S",
+        minsec="%H:%M:%S",
+        minutes="%H:%M:%S",
+        hourmin="%H:%M:%S",
+        hours="%H:%M:%S",
+        days="%H:%M:%S",
+        months="%H:%M:%S",
+        years="%H:%M:%S",
     )
 
 
@@ -326,27 +336,53 @@ def plot_spikes(spikes, x_range=None, width=800, height=400):
     if x_range is None:
         x_range = (spikes.timestamps[0] * 1e3, spikes.timestamps[-1] * 1e3)
     tools, pan, wheel_zoom = _x_only_tools()
-    p = figure(x_axis_label="Time", y_axis_label="Unit index", width=width,
-               height=height, x_axis_type="datetime", x_range=x_range, title="Spikes",
-               tools=tools, active_drag=pan, active_scroll=wheel_zoom)
+    p = figure(
+        x_axis_label="Time",
+        y_axis_label="Unit index",
+        width=width,
+        height=height,
+        x_axis_type="datetime",
+        x_range=x_range,
+        title="Spikes",
+        tools=tools,
+        active_drag=pan,
+        active_scroll=wheel_zoom,
+    )
     p.xaxis.formatter = _time_only_formatter()
     p.ygrid.grid_line_color = None
     p.yaxis.visible = False
     source = ColumnDataSource(data=dict(x=spikes.timestamps * 1e3, y=spikes.unit_index))
-    p.scatter("x", "y", source=source, size=5, color="navy", alpha=0.5,
-              marker="dash", angle=np.pi / 2)
+    p.scatter(
+        "x",
+        "y",
+        source=source,
+        size=5,
+        color="navy",
+        alpha=0.5,
+        marker="dash",
+        angle=np.pi / 2,
+    )
     return p
 
 
-def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
-                     width=800, height=200):
+def plot_time_series(
+    data, field, index=None, x_range=None, y_axis_label=None, width=800, height=200
+):
     """Line plot of one field of a time series, breaking the line over domain gaps."""
     if x_range is None:
         x_range = (data.timestamps[0] * 1e3, data.timestamps[-1] * 1e3)
     tools, pan, wheel_zoom = _x_only_tools()
-    p = figure(x_axis_label="Time", y_axis_label=y_axis_label or field, width=width,
-              height=height, x_axis_type="datetime", x_range=x_range,
-              tools=tools, active_drag=pan, active_scroll=wheel_zoom)
+    p = figure(
+        x_axis_label="Time",
+        y_axis_label=y_axis_label or field,
+        width=width,
+        height=height,
+        x_axis_type="datetime",
+        x_range=x_range,
+        tools=tools,
+        active_drag=pan,
+        active_scroll=wheel_zoom,
+    )
     p.xaxis.formatter = _time_only_formatter()
     p.axis.minor_tick_line_color = None
     x_values = data.timestamps * 1e3
@@ -354,7 +390,11 @@ def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
     # Insert NaNs at each domain edge so the line breaks over gaps instead of
     # interpolating straight across them.
     pad = np.nan * np.ones((len(data.domain), *y_values.shape[1:]))
-    x_values = np.concatenate([x_values, data.domain.start * 1e3, data.domain.end * 1e3])
+    x_values = np.concatenate([
+        x_values,
+        data.domain.start * 1e3,
+        data.domain.end * 1e3,
+    ])
     y_values = np.concatenate([y_values, pad, pad])
     order = np.argsort(x_values)
     x_values, y_values = x_values[order], y_values[order]
@@ -389,20 +429,51 @@ def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
 
 def plot_intervals(*interval, x_range=None, title=None, width=800, height=200):
     """One row of rectangles per Interval passed (each rectangle is one start/end)."""
-    colors = ["red", "blue", "green", "orange", "purple", "brown", "pink", "gray", "black"]
+    colors = [
+        "red",
+        "blue",
+        "green",
+        "orange",
+        "purple",
+        "brown",
+        "pink",
+        "gray",
+        "black",
+    ]
     tools, pan, wheel_zoom = _x_only_tools()
-    p = figure(title=title, x_axis_label="Time", x_range=x_range, y_axis_label="Intervals",
-               y_range=(-len(interval), 1), width=width, height=height, x_axis_type="datetime",
-               tools=tools, active_drag=pan, active_scroll=wheel_zoom)
+    p = figure(
+        title=title,
+        x_axis_label="Time",
+        x_range=x_range,
+        y_axis_label="Intervals",
+        y_range=(-len(interval), 1),
+        width=width,
+        height=height,
+        x_axis_type="datetime",
+        tools=tools,
+        active_drag=pan,
+        active_scroll=wheel_zoom,
+    )
     p.xaxis.formatter = _time_only_formatter()
     p.yaxis.visible = False
     p.grid.grid_line_color = None
     for i, iv in enumerate(interval):
         centers = (iv.start + iv.end) / 2.0 * 1e3
-        source = ColumnDataSource(data=dict(
-            x=centers, width=(iv.end - iv.start) * 1e3, y=np.zeros_like(centers) - i))
-        p.rect(x="x", y="y", width="width", height=0.8, source=source,
-               fill_color=colors[i % len(colors)], line_color="black", alpha=0.5)
+        source = ColumnDataSource(
+            data=dict(
+                x=centers, width=(iv.end - iv.start) * 1e3, y=np.zeros_like(centers) - i
+            )
+        )
+        p.rect(
+            x="x",
+            y="y",
+            width="width",
+            height=0.8,
+            source=source,
+            fill_color=colors[i % len(colors)],
+            line_color="black",
+            alpha=0.5,
+        )
     return p
 
 
@@ -449,24 +520,42 @@ def _thin(obj, field, target=4000):
 # min recording; bounds keeps pan/zoom from ever leaving the session's extent,
 # and the reset tool snaps back to this default window.
 DEFAULT_ZOOM_S = 300  # 5 minutes
-shared_x = Range1d(
-    0.0, min(DEFAULT_ZOOM_S, T_END) * 1e3, bounds=(0.0, T_END * 1e3)
-)
+shared_x = Range1d(0.0, min(DEFAULT_ZOOM_S, T_END) * 1e3, bounds=(0.0, T_END * 1e3))
 W = 900
 
 p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=360)
-p_raster.title.text = f"One recording, one shared clock ({len(keep)} of {n_units} neurons)"
+p_raster.title.text = (
+    f"One recording, one shared clock ({len(keep)} of {n_units} neurons)"
+)
 
 p_trials = plot_intervals(
     ov_rec.trials, x_range=shared_x, title="task trials", width=W, height=80
 )
 
-p_wheel = plot_time_series(_thin(ov_rec.wheel, "speed"), "speed", x_range=shared_x,
-                           y_axis_label="wheel speed", width=W, height=130)
-p_whisk = plot_time_series(_thin(ov_rec.whisker, "motion_energy"), "motion_energy",
-                           x_range=shared_x, y_axis_label="whisker ME", width=W, height=130)
-p_paw = plot_time_series(_thin(ov_rec.paws, "left_paw_speed"), "left_paw_speed",
-                         x_range=shared_x, y_axis_label="L paw speed", width=W, height=130)
+p_wheel = plot_time_series(
+    _thin(ov_rec.wheel, "speed"),
+    "speed",
+    x_range=shared_x,
+    y_axis_label="wheel speed",
+    width=W,
+    height=130,
+)
+p_whisk = plot_time_series(
+    _thin(ov_rec.whisker, "motion_energy"),
+    "motion_energy",
+    x_range=shared_x,
+    y_axis_label="whisker ME",
+    width=W,
+    height=130,
+)
+p_paw = plot_time_series(
+    _thin(ov_rec.paws, "left_paw_speed"),
+    "left_paw_speed",
+    x_range=shared_x,
+    y_axis_label="L paw speed",
+    width=W,
+    height=130,
+)
 
 # Only the bottom panel needs to show the (shared) time axis.
 for p in (p_raster, p_trials, p_wheel, p_whisk):
@@ -482,9 +571,9 @@ _ = gc.collect()
 # %% [markdown]
 # ### Lazy loading: pay only for what you touch
 #
-# This session is **1.93 GB** on disk. Reading all of it into memory at once is
+# This session is **~0.43 GB** on disk. Reading all of it into memory at once is
 # both possible and a bad idea: `materialize()` pulls every array into RAM, and
-# the footprint below (~1.8 GB) would then be paid again for every session a
+# the footprint below would then be paid again for every session a
 # foundation model trains on.
 
 # %%
@@ -523,7 +612,8 @@ if before is not None:
 else:
     print(f"materialize() into RAM:       {dt_materialize:5.2f} s")
 
-# Drop it again so we do not carry ~1.8 GB through the rest of the notebook.
+# Drop it again so we do not carry the materialized session through the rest
+# of the notebook.
 del full, eager_rec
 _ = gc.collect()
 
@@ -615,148 +705,6 @@ for bs in (0.02, 0.05, 0.10):
 # sampling jitter: each is a one-line change to the pipeline. The appendix,
 # *Why this framework is powerful*, works through them.
 
-# %%
-from pathlib import Path
-from typing import Literal, TypeAlias, get_args
-
-from torch_brain.datasets import Dataset, DatasetIndex, SpikingDatasetMixin
-from torch_brain.transforms import UnitFilter
-from torch_brain.utils import bin_spikes
-
-Split: TypeAlias = Literal["train", "val", "test"]
-
-
-def good_units_mask(units):
-    """Keep KiloSort-good, >=1 Hz units on QC-passing probes (the 'filtered' set)."""
-    return (
-        (np.asarray(units.label) == 1.0)
-        & (np.asarray(units.firing_rate) >= 1.0)
-        & (np.asarray(units.qc_neural) == b"PASS")
-    )
-
-
-class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
-    """
-    Dataset for the IBL Brain-Wide Map (2025), for a single recording.
-
-    Args:
-        root: The root directory of the dataset.
-        dirname: The name of the dataset (and the directory containing its data).
-        recording_id: The recording id to load.
-        split: The split of the dataset (train, val, test), or None to skip
-            split-based interval filtering (e.g. when just exploring a recording).
-        bin_size: The spike-binning width in seconds. Only required when the
-            dataset is actually indexed (i.e. not for exploration-only use).
-        filter_units: Whether to restrict to good-quality units (see
-            `good_units_mask`).
-    """
-
-    # wheel speed is a 1D continuous signal, regularly sampled at BEHAVIOR_SFREQ (50 Hz).
-    out_dim = 1
-    spiking_dataset_mixin_uniquify_unit_ids = True
-    CONTEXT_WINDOW = 1.0  # seconds
-    BEHAVIOR_SFREQ = 50  # Hz
-
-    def __init__(
-        self,
-        root: str,
-        recording_id: str,
-        dirname: str = "ibl_brain_wide_map_2025",
-        split: Split | None = "train",
-        bin_size: float | None = None,
-        filter_units: bool = True,
-    ):
-        if split is not None and split not in get_args(Split):
-            raise ValueError(
-                f"split={split} not well defined, should be one of {get_args(Split)} or None"
-            )
-
-        # Single session used by this example (matches recording_ids.txt,
-        # kept for the local/brainsets-pipeline workflow described in the
-        # README).
-        all_recording_ids = ["0802ced5-33a3-405e-8336-b65ebc5cb07c"]
-        if recording_id not in all_recording_ids:
-            raise ValueError(f"{recording_id!r} not found in recording ids")
-
-        self.dataset_dir = Path(root) / dirname
-
-        super().__init__(
-            dataset_dir=self.dataset_dir,
-            recording_ids=[recording_id],
-            transform=None,
-            namespace_attributes=[
-                "session.id",
-                "subject.id",
-                "units.id",
-                "probes.id",
-            ],
-        )
-
-        # store some attributes that are useful later
-        self.split = split
-        self.recording_id = recording_id
-        self.bin_size = bin_size
-        self.out_sampling_rate = float(self.BEHAVIOR_SFREQ)  # 50 Hz
-        # Each sample spans CONTEXT_WINDOW seconds (1.0 s).
-        self.out_samples = round(self.CONTEXT_WINDOW * self.out_sampling_rate)  # 50
-        self.num_bins = (
-            round(self.CONTEXT_WINDOW / self.bin_size) if self.bin_size else None
-        )  # 20 at 0.05 s
-
-        # Move from the unfiltered population to the filtered (good-quality) units.
-        # UnitFilter drops the spikes of non-kept units and reindexes, so downstream
-        # binning just sees fewer units. num_units is the count the model will get.
-        units = self.get_recording(recording_id).units
-        if filter_units:
-            self._unit_filter = UnitFilter(mask_fn=good_units_mask, field="spikes")
-            self.num_units = int(good_units_mask(units).sum())
-        else:
-            self._unit_filter = None
-            self.num_units = len(self.get_unit_ids())
-
-    # Contract between Datasets and Samplers:
-    # get_sampling_intervals() returns {recording_id: Interval} listing
-    # the windows the sampler may draw from.
-    # Sampler will emit one DatasetIndex per sample.
-    def get_sampling_intervals(self, *_args, **_kwargs):
-        rid = self.recording_id
-        recording = self.get_recording(rid)
-
-        # Trials aligned to the IBL decision-making task (each is a 1.0 s window).
-        intervals = recording.task_aligned_intervals.domain
-        # The dataset provides a causal 40/20/40 temporal train/val/test split;
-        # intersect with the requested split's domain.
-        intervals = intervals & getattr(recording, f"{self.split}_domain")
-        # Wheel decoding is scored within the movement window of each trial.
-        intervals = intervals & recording.task_aligned_intervals.movement_intervals
-        # And only where the wheel signal itself is defined.
-        intervals = intervals & recording.wheel._domain
-        return {rid: intervals}
-
-    # `index` is a DatasetIndex(recording_id, start, end) produced by the sampler.
-    def __getitem__(self, index: DatasetIndex):
-        # Slice the recording to this sample's time window; all modalities
-        # (.spikes, .units, .wheel.speed, ...) are cropped (lazily).
-        recording = self.get_recording(index.recording_id)
-        data = recording.slice(index.start, index.end)
-
-        # Keep only the good-quality units (no-op when filter_units=False).
-        if self._unit_filter is not None:
-            data = self._unit_filter(data)
-
-        # All models take (num_bins, num_units) and return (out_samples, out_dim).
-
-        # Spikes are an irregular event stream -> bin them into a regular grid.
-        X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
-        X = torch.from_numpy(X).float()  # shape: (num_bins, num_units)
-
-        # Wheel speed is already regularly sampled at 50 Hz. It is NOT normalized.
-        Y = np.asarray(data.wheel.speed, dtype=np.float32)  # shape: (out_samples,)
-        Y = torch.from_numpy(Y).unsqueeze(-1)  # shape: (out_samples, out_dim=1)
-
-        return X, Y
-
-
 # %% [markdown]
 # ## Dataset and DataLoader in PyTorch
 #
@@ -801,14 +749,123 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 # pixel-valued whisker/paw signals), so we use the raw signal as the target.
 # (If you swap in another covariate as the target, normalization may matter.)
 #
-# **Unfiltered vs. filtered units.** The recording ships with *all*
-# recorded units (the TS1 default: no QC filtering). We move to the **filtered**
-# set here via a `UnitFilter` transform that keeps only good-quality units:
-# `label == 1.0` (KiloSort "good") AND `firing_rate >= 1 Hz` AND
-# `qc_neural == PASS` (probe QC). For this session that is **1547 -> 358 units**.
-# Fewer, higher-quality units means a much lower-dimensional input, which
-# directly reduces the overfitting we saw with the full population.
+# **Good units only.** The raw session recorded 1547 units, but many are noise
+# clusters, low-firing, or sit on a probe that failed QC. Rather than filtering
+# them out here at read-time, this tutorial's `brainsets` pipeline
+# ([`ibl_brain_wide_map_2025/pipeline.py`](ibl_brain_wide_map_2025/pipeline.py))
+# does it once, upstream, via three `--unit-filter` flags passed to
+# `brainsets prepare`: `probe_qc` (`qc_neural == PASS`), `firing_rate`
+# (`firing_rate > 1 Hz`), and `unit_qc` (KiloSort/IBL's own `label == 1.0`,
+# "good"). Because the pipeline is just plain Python, adding this custom
+# quality logic is a few lines in `extract_spikes()`, no different from any
+# other preprocessing step. The processed `.h5` this notebook loads was built
+# with all three flags, so it already ships with only the **358 good-quality
+# units**; the discarded units' spikes were never written to disk at all.
 #
+# Filtering upstream instead of on every read also makes this example faster
+# to run: a smaller file to download (~0.4 GB vs. ~1.9 GB unfiltered), fewer
+# units for every downstream step (binning, the model's input layer, one
+# fewer filtering pass per `__getitem__`), so both loading the session and
+# training all three decoders below take noticeably less time.
+#
+# %%
+from pathlib import Path
+from typing import Literal, TypeAlias
+
+from torch_brain.datasets import Dataset, DatasetIndex, SpikingDatasetMixin
+from torch_brain.transforms import UnitFilter
+from torch_brain.utils import bin_spikes
+
+Split: TypeAlias = Literal["train", "val", "test"]
+
+
+class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
+    """
+    Dataset for the IBL Brain-Wide Map (2025), for a single recording.
+
+    Args:
+        root: The root directory of the dataset.
+        dirname: The name of the dataset (and the directory containing its data).
+        recording_id: The recording id to load.
+        bin_size: The spike-binning width in seconds. Only required when the
+            dataset is actually indexed (i.e. not for exploration-only use).
+        split: The split of the dataset (train, val, test), or None to skip
+            split-based interval filtering (e.g. when just exploring a recording).
+
+    """
+
+    # wheel speed is a 1D continuous signal, regularly sampled at BEHAVIOR_SFREQ (50 Hz).
+    out_dim = 1
+    spiking_dataset_mixin_uniquify_unit_ids = True
+    CONTEXT_WINDOW = 1.0  # seconds
+    BEHAVIOR_SFREQ = 50  # Hz
+
+    def __init__(
+        self,
+        root: str,
+        recording_id: str,
+        bin_size: float | None = None,
+        dirname: str = "ibl_brain_wide_map_2025",
+        split: Split | None = "train",
+    ):
+        super().__init__(
+            dataset_dir=Path(root) / dirname,
+            recording_ids=[recording_id],
+        )
+
+        # store some attributes that are useful later
+        self.split = split
+        self.recording_id = recording_id
+        self.bin_size = bin_size
+        self.out_sampling_rate = float(self.BEHAVIOR_SFREQ)  # 50 Hz
+        # Each sample spans CONTEXT_WINDOW seconds (1.0 s).
+        self.out_samples = round(self.CONTEXT_WINDOW * self.out_sampling_rate)  # 50
+        self.num_bins = (
+            round(self.CONTEXT_WINDOW / self.bin_size) if self.bin_size else None
+        )  # 20 at 0.05 s
+        # The pipeline already restricts this recording to good-quality units
+        # (see "Good units only" below), so num_units is just the unit count.
+        self.num_units = len(self.get_unit_ids())
+
+    # Contract between Datasets and Samplers:
+    # get_sampling_intervals() returns {recording_id: Interval} listing
+    # the windows the sampler may draw from.
+    # Sampler will emit one DatasetIndex per sample.
+    def get_sampling_intervals(self, *_args, **_kwargs):
+        rid = self.recording_id
+        recording = self.get_recording(rid)
+
+        # Trials aligned to the IBL decision-making task (each is a 1.0 s window).
+        intervals = recording.task_aligned_intervals.domain
+        # The dataset provides a causal 40/20/40 temporal train/val/test split;
+        # intersect with the requested split's domain.
+        intervals = intervals & getattr(recording, f"{self.split}_domain")
+        # Wheel decoding is scored within the movement window of each trial.
+        intervals = intervals & recording.task_aligned_intervals.movement_intervals
+        # And only where the wheel signal itself is defined.
+        intervals = intervals & recording.wheel._domain
+        return {rid: intervals}
+
+    # `index` is a DatasetIndex(recording_id, start, end) produced by the sampler.
+    def __getitem__(self, index: DatasetIndex):
+        # Slice the recording to this sample's time window; all modalities
+        # (.spikes, .units, .wheel.speed, ...) are cropped (lazily).
+        recording = self.get_recording(index.recording_id)
+        data = recording.slice(index.start, index.end)
+
+        # All models take (num_bins, num_units) and return (out_samples, out_dim).
+
+        # Spikes are an irregular event stream -> bin them into a regular grid.
+        X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
+        X = torch.from_numpy(X).float()  # shape: (num_bins, num_units)
+
+        # Wheel speed is already regularly sampled at 50 Hz. It is NOT normalized.
+        Y = np.asarray(data.wheel.speed, dtype=np.float32)  # shape: (out_samples,)
+        Y = torch.from_numpy(Y).unsqueeze(-1)  # shape: (out_samples, out_dim=1)
+
+        return X, Y
+
+
 # %% [markdown]
 # ## Creating the Datasets, Samplers, and DataLoaders
 #
@@ -1217,8 +1274,6 @@ class IBLCovariateDataset(IBLBrainWideMap2025):
     def __getitem__(self, index):
         recording = self.get_recording(index.recording_id)
         data = recording.slice(index.start, index.end)
-        if self._unit_filter is not None:
-            data = self._unit_filter(data)
 
         X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
         X = torch.from_numpy(X).float()
@@ -1276,10 +1331,11 @@ print(f"Demo window starts at {DEMO_T0:.2f} s")
 # ## 1. Lazy loading and the time gain
 #
 # A `brainsets` recording is memory-mapped: `data.slice(start, end)` reads only
-# the bytes for the window you ask for. You open a ~2 GB session in milliseconds
-# and each sample touches a tiny slice of it, so you never hold the session (or
-# even one full modality) in RAM. That is what makes training over a 65-min
-# session, or scaling to many sessions, feasible at all.
+# the bytes for the window you ask for. You open a session in milliseconds
+# regardless of its size, and each sample touches a tiny slice of it, so you
+# never hold the session (or even one full modality) in RAM. That is what
+# makes training over a 65-min session, or scaling to many sessions, feasible
+# at all.
 #
 # The catch: lazy is cheap *per call*, but `IBLBrainWideMap2025.__getitem__`
 # redoes the slice + bin on *every* epoch, since it does not cache. For this
