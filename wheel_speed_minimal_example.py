@@ -1,21 +1,23 @@
 # %% [markdown]
 # # Building Neuro-AI Foundation Models with TorchBrain
 #
-# *A minimal training setup for behavior decoding (Janelia NeuroDataReHack).*
+# *A hands-on tutorial on decoding behavior with TorchBrain (Janelia NeuroDataReHack).*
 #
 # [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AlexandreAndr/janelia_ibl_bwm_talk/blob/main/wheel_speed_minimal_example.ipynb)
 #
-# This example walks through a minimal training pipeline for **decoding behavior**
-# from spiking activity recorded in the **mouse brain with Neuropixels probes**,
-# using a single session of the IBL Brain-Wide Map. Each session records many
-# behavioral signals on a shared clock (wheel motion, whisker motion energy, paw
-# positions/speeds, and licks), any of which can be a decoding target.
+# This tutorial walks you through a minimal training pipeline for **decoding
+# behavior** from spiking activity recorded in the **mouse brain with
+# Neuropixels probes**, using a single session of the IBL Brain-Wide Map. Each
+# session records several behavioral signals on a shared clock (wheel motion,
+# whisker motion energy, and paw positions/speeds), any of which can be a
+# decoding target.
 #
 # <!-- TODO: check how many Neuropixels probes were inserted for this session -->
 #
 # As a concrete, end-to-end example we decode **wheel speed** (a 1D continuous
-# signal sampled at 50 Hz). Treat it as an interactive starting point: swap in
-# another behavioral covariate as the target, or try the composable transforms
+# signal sampled at 50 Hz). Treat it as an interactive starting point: the
+# **Hands On** section lets you swap in another behavioral covariate as the
+# decoding target, and can be extended further using the composable transforms
 # shown in the appendix.
 #
 # The data comes from the IBL Brain-Wide Map:
@@ -24,34 +26,48 @@
 # [🐍 ONE API](https://int-brain-lab.github.io/ONE/){.btn .btn-outline-primary .btn-sm target="_blank"}
 # [🧠 Interactive viz](https://viz.internationalbrainlab.org){.btn .btn-outline-primary .btn-sm target="_blank"}
 #
-# It is a transparent, **self-contained** example (everything it needs lives in
-# this one folder) that shows how to
-# 1. Build a custom `Dataset` on top of a `brainsets` recording (defined
-#    directly below, self-contained in this script).
-# 2. Sample fixed-length trials around the decision-making task using `TrialSampler`.
-# 3. Train one of three small decoders (a linear readout, a bidirectional GRU, or a dilated TCN).
+# By working through this tutorial, you will learn how to
+# 1. Build a custom `Dataset` on top of a `brainsets` recording, so any
+#    pre-processed session becomes trainable with a few lines of code.
+# 2. Sample fixed-length trials around a decision-making task using
+#    `TrialSampler`, the standard pattern for turning a continuous recording
+#    into training examples.
+# 3. Train and compare three small decoders (a linear readout, a bidirectional
+#    GRU, and a dilated TCN) on the same data pipeline, so you can see how
+#    architecture choice alone affects decoding performance.
 #
-# It runs on CPU, but a GPU runtime is recommended.
 
 # %% [markdown]
 # ## Setup
 #
-# This folder is self-contained. The session is produced **by the brainset
-# pipeline copied alongside this script** (`ibl_brain_wide_map_2025/`), written
-# into the local `processed/` directory. The pipeline processes exactly the eids
-# listed in `ibl_brain_wide_map_2025/eval_eids.txt`, which has been trimmed to
-# the single session used here (the full lists are kept as `*.full.txt.bak`). To
-# (re)download and process it, run from this folder:
+# Neuroscience datasets are usually distributed through a lab- or
+# consortium-specific API — here, the IBL's own **ONE API**. `brainsets` is a
+# pipeline that wraps around that native access pattern: it downloads the raw
+# session and converts it into the standardized HDF5 format that `torch-brain`
+# datasets expect. The pipeline used for a given dataset can be one shared by
+# the community (like `ibl_brain_wide_map_2025/`, copied alongside this
+# notebook) or your own local, private one, if the dataset isn't public.
+#
+# To (re)download and process the session used in this tutorial from scratch,
+# run from this folder:
 #
 # ```bash
 # brainsets prepare ./ibl_brain_wide_map_2025 --local \
 #   --processed-dir ./processed --raw-dir ./raw
 # ```
 #
-# This downloads the raw IBL session via the ONE API and processes it into
-# `processed/ibl_brain_wide_map_2025/<recording_id>.h5` (TS1 defaults: no
-# QC filtering). Requires ONE API credentials; the raw download is ~5.5 GB and
-# the processed h5 ~1.8 GB. See this folder's `README.md` for details.
+# This requires ONE API credentials, and downloads/processes ~5.5 GB of raw
+# data into a ~1.8 GB HDF5 file. For this tutorial we skip that step: the cells
+# below instead fetch the single, already-processed session straight from the
+# Hugging Face Hub (public, no login required), so you can get started in
+# seconds. See this folder's `README.md` for more details.
+#
+
+# %% [markdown]
+# **If running in Colab:** install this notebook's pinned dependencies
+# that aren't already preinstalled. The session data itself is fetched
+# separately below, so no repo checkout is required.
+#
 
 # %%
 # Running in Google Colab: install this notebook's pinned deps first. Colab
@@ -86,6 +102,10 @@ if IN_COLAB:
         check=True,
     )
 
+# %% [markdown]
+# Pick the local paths and the single session (`RECORDING_ID`) this
+# tutorial decodes.
+
 # %%
 # This folder's own path, used to locate the local data dir regardless of cwd.
 _HERE = (
@@ -98,6 +118,10 @@ _HERE = (
 DATA_ROOT = os.path.join(_HERE, "processed")
 DATASET_DIRNAME = "ibl_brain_wide_map_2025"
 RECORDING_ID = "0802ced5-33a3-405e-8336-b65ebc5cb07c"
+
+# %% [markdown]
+# Download the pre-processed session from the Hugging Face Hub, skipping
+# the download if it's already on disk.
 
 # %%
 # Fetch the pre-processed session (~1.9 GB) from the Hugging Face Hub instead of
@@ -116,6 +140,10 @@ if not os.path.exists(_session_path):
         filename=f"{RECORDING_ID}.h5",
         local_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
     )
+
+# %% [markdown]
+# Imports, plus the training hyperparameters used throughout this
+# tutorial.
 
 # %%
 import matplotlib.pyplot as plt
@@ -144,13 +172,14 @@ print(f"Using device: {device}")
 # Before building the dataset, let's see what a `brainsets` recording actually
 # *is*. Each session is a single, lazily-loaded object that holds every modality
 # on one shared time axis: the spikes of all recorded neurons, plus behavioral
-# covariates (wheel, whisker, paws, licks) and the trial structure.
+# covariates (wheel, whisker, paws) and the trial structure.
 #
 # **Materialize vs. load.** `brainsets prepare` converts the raw IBL session into
 # one HDF5 file on disk (~1.9 GB for this session). We never load all of that:
 # the `Dataset` opens the file and `data.slice(start, end)` reads back only the
 # short window we ask for. That is what makes training over a 65-minute session
 # on a laptop practical.
+#
 
 # %%
 from pathlib import Path
@@ -312,7 +341,7 @@ viz_ds = IBLBrainWideMap2025(root=DATA_ROOT, recording_id=RECORDING_ID, split=No
 viz_rec = viz_ds.get_recording(RECORDING_ID)
 T_END = float(viz_rec.domain.end[-1])
 print(f"Session length: {T_END:.0f} s ({T_END / 60:.0f} min)")
-print(f"Neurons: {len(viz_rec.units.id)}  |  covariates: wheel, whisker, paws, licks")
+print(f"Neurons: {len(viz_rec.units.id)}  |  covariates: wheel, whisker, paws")
 
 # %% [markdown]
 # ### The full session and its causal split
@@ -518,8 +547,8 @@ plt.show()
 # %% [markdown]
 # ## Defining a Simple & Custom Dataset
 #
-# `IBLBrainWideMap2025` (defined above) is a self-contained, `brainsets`-backed
-# dataset for a single recording. Two methods matter for the wheel-speed task:
+# `IBLBrainWideMap2025` (defined above) is a `brainsets`-backed dataset for a
+# single recording. Two methods matter for the wheel-speed task:
 # - **`get_sampling_intervals`**: Decides *which* time windows count as samples.
 #   For wheel-speed decoding, each sample is a fixed **1.0 s** window drawn from
 #   the trials of the IBL decision-making task, restricted to the movement window
@@ -905,6 +934,79 @@ ax.legend(loc="upper left")
 
 plt.tight_layout()
 plt.show()
+
+
+# %% [markdown]
+# ---
+# # Hands On: Decode a Different Covariate
+#
+# Now it's your turn. Everything you need is already defined above: the dataset
+# class, the samplers, and the training loop. This exercise focuses on the one
+# piece that changes when you decode a new signal: **what `__getitem__` returns
+# as `Y`**.
+#
+# **Goal:** instead of wheel speed, decode one of the other covariates recorded
+# in this session — `whisker.motion_energy`, `paws.left_paw_speed`, or
+# `paws.right_paw_speed` (see "The behavioral covariates" above for what these
+# look like).
+#
+# **Steps:**
+# 1. Pick a covariate from the list above.
+# 2. Subclass `IBLBrainWideMap2025` (skeleton below) and point `Y` at your
+#    chosen covariate instead of `data.wheel.speed`.
+# 3. Instantiate train/val/test datasets, samplers, and loaders for your new
+#    class, exactly as in "Creating the Datasets, Samplers, and DataLoaders".
+# 4. Re-run the training loop on a fresh model instance, and compare its
+#    validation R² to wheel speed's.
+#
+# This is a self-check: if your new covariate trains and its R² is in a
+# plausible range, your subclass is wired correctly. If you want to go further,
+# this is also the natural place to try the transforms from the appendix below
+# (a finer bin size, a longer context window, unit dropout, ...) on your new
+# target.
+#
+
+# %%
+class IBLCovariateDataset(IBLBrainWideMap2025):
+    """Same as IBLBrainWideMap2025, but decodes `namespace.attr` instead of wheel speed."""
+
+    def __init__(self, *args, namespace: str, attr: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.namespace = namespace
+        self.attr = attr
+
+    def __getitem__(self, index):
+        key = (index.recording_id, index.start, index.end)
+        if key in self._cache:
+            return self._cache[key]
+
+        recording = self.get_recording(index.recording_id)
+        data = recording.slice(index.start, index.end)
+        if self._unit_filter is not None:
+            data = self._unit_filter(data)
+
+        X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
+        X = torch.from_numpy(X).float()
+
+        # TODO: read your chosen covariate instead of the wheel speed, e.g.
+        # Y = np.asarray(getattr(getattr(data, self.namespace), self.attr), dtype=np.float32)
+        Y = np.asarray(data.wheel.speed, dtype=np.float32)  # <-- replace this line
+        Y = torch.from_numpy(Y).unsqueeze(-1)
+
+        self._cache[key] = (X, Y)
+        return X, Y
+
+
+# TODO: pick a covariate to decode
+NAMESPACE = "whisker"  # try: "whisker", "paws"
+ATTR = "motion_energy"  # try: "motion_energy", "left_paw_speed", "right_paw_speed"
+
+# TODO: build train/val/test IBLCovariateDataset instances (passing
+# namespace=NAMESPACE, attr=ATTR), wrap each in a TrialSampler + DataLoader
+# (same pattern as "Creating the Datasets, Samplers, and DataLoaders" above),
+# then re-run the training loop on a fresh model instance and compare its
+# validation R² to wheel speed's.
+
 
 # %% [markdown]
 # ---
