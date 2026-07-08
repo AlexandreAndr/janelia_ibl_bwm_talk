@@ -175,6 +175,271 @@ print(f"Using device: {device}")
 # covariates (wheel, whisker, paws) and the trial structure.
 #
 
+# %% [markdown]
+# We start by opening a single session with the base `Dataset` and printing it.
+# What comes back is one object: some scalar metadata, plus a nested tree of typed
+# containers that hold every modality on a shared clock.
+
+# %%
+from torch_brain.datasets import Dataset as BaseDataset
+
+# Open one session. This maps the HDF5 file but reads no signals yet.
+peek_ds = BaseDataset(
+    dataset_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
+    recording_ids=[RECORDING_ID],
+)
+recording = peek_ds.get_recording(RECORDING_ID)
+print(recording)
+
+# %% [markdown]
+# ### The building blocks
+#
+# A recording is assembled from just five container types. Recognising them is
+# enough to navigate any `brainsets` session:
+#
+# - **`Data`** is the container: it nests other objects plus scalar metadata. The
+#   recording itself is a `Data`, and so are `session`, `subject`, `brainset`, and
+#   `task_aligned_intervals`.
+# - **`RegularTimeSeries`** is a signal on a fixed sampling grid (one rate, no
+#   per-sample timestamps needed). Here: `wheel`, `whisker`, and `paws`, all at
+#   50 Hz.
+# - **`IrregularTimeSeries`** is a stream of events, each carrying its own
+#   timestamp. Here: `spikes`, 58.5 M spike times tagged with a `unit_index`.
+# - **`Interval`** is a set of labelled time segments, one `start` and `end` per
+#   row. Here: `trials` (424 of them), `movement_intervals`, and the `train`,
+#   `val`, and `test_domain` splits.
+# - **`ArrayDict`** is a table of per-item arrays sharing one axis. Here: `units`
+#   (1547 neurons, each with an `id`, a 3D `(x, y, z)` coordinate, a
+#   `region_cosmos` brain area, a `firing_rate`, and more) and `probes`.
+#
+# One detail to carry into the next section: every array above printed as a
+# `Lazy...` type. Nothing has been read from disk yet; the recording is still just
+# a memory-mapped view of the file.
+
+# %% [markdown]
+# ### One session on a shared clock
+#
+# Because every modality is indexed by the same clock, we can line them up in a
+# single figure: the spiking of all neurons (top, with units subsampled and their
+# spikes thinned so a 65 min raster stays legible), the task trials, and three of
+# the behavioral signals. This is the whole recording at a glance, and the raw
+# material each training sample is later carved from.
+
+# %%
+import gc
+
+# A fresh handle just for this overview (all reads below are lazy).
+ov_rec = BaseDataset(
+    dataset_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
+    recording_ids=[RECORDING_ID],
+).get_recording(RECORDING_ID)
+
+T_END = float(ov_rec.domain.end[-1])
+spk_t = np.asarray(ov_rec.spikes.timestamps)
+spk_u = np.asarray(ov_rec.spikes.unit_index)
+n_units = len(ov_rec.units.id)
+
+# Subsample ~90 units and thin each unit's spikes 5x, so a 65 min raster reads.
+keep = np.arange(0, n_units, max(1, n_units // 90))
+row_of = {u: i for i, u in enumerate(keep)}
+m = np.isin(spk_u, keep)
+spk_t, spk_row = spk_t[m], np.array([row_of[u] for u in spk_u[m]])
+raster = [spk_t[spk_row == r][::5] for r in range(len(keep))]
+
+tr_s, tr_e = np.asarray(ov_rec.trials.start), np.asarray(ov_rec.trials.end)
+signals = [
+    ("wheel", "speed", "wheel\nspeed"),
+    ("whisker", "motion_energy", "whisker\nME"),
+    ("paws", "left_paw_speed", "L paw\nspeed"),
+]
+
+fig, axes = plt.subplots(
+    2 + len(signals),
+    1,
+    figsize=(11, 6.8),
+    sharex=True,
+    gridspec_kw={"height_ratios": [3, 0.35] + [1] * len(signals)},
+)
+axes[0].eventplot(
+    raster,
+    colors="k",
+    lineoffsets=list(range(len(keep))),
+    linelengths=1.0,
+    linewidths=0.5,
+    alpha=0.7,
+    rasterized=True,
+)
+axes[0].set_ylim(0, len(keep))
+axes[0].set_yticks([0, len(keep)])
+axes[0].set_ylabel(f"neurons\n({len(keep)} of {n_units})", fontsize=9)
+axes[0].set_title("One recording, one shared clock: spikes, task trials, and behavior")
+
+# task trials as their own strip (each bar is one trial)
+axes[1].broken_barh(
+    list(zip(tr_s, tr_e - tr_s)), (0.15, 0.7), facecolors="#4C72B0", alpha=0.8
+)
+axes[1].set_ylim(0, 1)
+axes[1].set_yticks([])
+axes[1].set_ylabel("trials", fontsize=9, rotation=0, ha="right", va="center")
+
+for ax, (ns, attr, lab) in zip(axes[2:], signals):
+    obj = getattr(ov_rec, ns)
+    ax.plot(
+        np.asarray(obj.timestamps),
+        np.asarray(getattr(obj, attr)),
+        lw=0.45,
+        color="#333333",
+    )
+    ax.set_ylabel(lab, fontsize=9)
+    ax.margins(x=0)
+
+axes[-1].set_xlim(0, T_END)
+axes[-1].set_xlabel("Time in session (s)")
+plt.tight_layout()
+plt.show()
+
+# Free the spike arrays we pulled in just for the plot (~0.9 GB).
+del spk_t, spk_u, spk_row, raster, ov_rec
+_ = gc.collect()
+
+# %% [markdown]
+# ### Lazy loading: pay only for what you touch
+#
+# This session is **1.93 GB** on disk. Reading all of it into memory at once is
+# both possible and a bad idea: `materialize()` pulls every array into RAM, and
+# the footprint below (~1.8 GB) would then be paid again for every session a
+# foundation model trains on.
+
+# %%
+import time
+
+
+def _rss_gb():
+    """Resident memory of this process, in GB (Linux; None elsewhere)."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1e6  # kB -> GB
+    except OSError:
+        return None
+
+
+fpath = os.path.join(DATA_ROOT, DATASET_DIRNAME, f"{RECORDING_ID}.h5")
+print(f"session on disk:              {os.path.getsize(fpath) / 1e9:5.2f} GB")
+
+eager_rec = BaseDataset(
+    dataset_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
+    recording_ids=[RECORDING_ID],
+).get_recording(RECORDING_ID)
+
+before = _rss_gb()
+t = time.time()
+full = eager_rec.materialize()  # read EVERYTHING into memory (what we avoid)
+dt = time.time() - t
+after = _rss_gb()
+if before is not None:
+    print(f"materialize() into RAM:       {dt:5.2f} s   (+{after - before:4.2f} GB resident)")
+else:
+    print(f"materialize() into RAM:       {dt:5.2f} s")
+
+# Drop it again so we do not carry ~1.8 GB through the rest of the notebook.
+del full, eager_rec
+_ = gc.collect()
+
+# %% [markdown]
+# But a training step never needs the whole session. It reads a short **temporal
+# slice** and, within it, only the **input** and the **target** (here the spikes
+# and one behavioral signal). Everything else, every other modality and every
+# other time point, can stay on disk. That is what lazy loading buys: the
+# recording is memory-mapped, and you pay (bytes read, RAM used) only for the
+# attributes and time windows you actually access.
+#
+# Two examples, with their runtimes:
+
+# %%
+from torch_brain.utils import bin_spikes
+
+# A fresh, lazily-opened recording (reads no signals).
+lazy_rec = BaseDataset(
+    dataset_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
+    recording_ids=[RECORDING_ID],
+).get_recording(RECORDING_ID)
+
+# (i) Load a SINGLE attribute: just the wheel speed, and nothing else.
+t = time.time()
+wheel_speed = np.asarray(lazy_rec.wheel.speed)
+dt = (time.time() - t) * 1e3
+print(
+    f"(i) load wheel.speed only:   {dt:6.2f} ms   "
+    f"({wheel_speed.nbytes / 1e6:.2f} MB, the whole 65 min at 50 Hz)"
+)
+
+# (ii) Load a SINGLE 1.0 s window: exactly one training sample's worth of data.
+mv = lazy_rec.task_aligned_intervals.movement_intervals
+t0 = float(np.asarray(mv.start)[10])
+t = time.time()
+window = lazy_rec.slice(t0, t0 + 1.0)  # crop every modality to [t0, t0 + 1 s]
+X = bin_spikes(window.spikes, num_units=len(window.units), bin_size=BIN_SIZE)
+y = np.asarray(window.wheel.speed)
+dt = (time.time() - t) * 1e3
+print(
+    f"(ii) slice one 1.0 s window: {dt:6.2f} ms   "
+    f"(X = {tuple(X.shape)} binned spikes, y = {y.shape} wheel speed)"
+)
+
+# %% [markdown]
+# ::: {.callout-tip}
+# ## Why this matters for neuro foundation models
+#
+# - **Fast, minimal reads.** Each training step loads only the variables and the
+#   short time window the model needs, so a step touches megabytes, not gigabytes,
+#   no matter how large the underlying session is.
+# - **Store more at no model cost.** The file can keep everything (all units, every
+#   behavioral signal, raw QC fields, alternative labels) for future benchmarking
+#   or new tasks. Unused fields cost disk space, not RAM or training time, because
+#   they are simply never read.
+# - **Defer processing to the slice.** Since each window is tiny, per-sample steps
+#   (binning, normalization, adding noise) are cheap to compute on the fly. You can
+#   reparametrize them, or try variants, without ever reprocessing the file on disk.
+# :::
+
+# %% [markdown]
+# ### Transforms: deferring computation to each slice
+#
+# That last point is exactly what a **transform** is: a small function applied to a
+# window right after the lazy slice and before the model, inside `__getitem__`.
+# Because it runs per sample on a tiny crop, it is cheap, and swapping or chaining
+# transforms reshapes the pipeline without touching the data on disk or the model.
+#
+# Binning is the clearest example. Spikes arrive as an irregular event stream, but
+# the model wants a regular grid, so each window is binned on the fly. The bin
+# width is just a parameter: change it and the model input reshapes, with no
+# reprocessing.
+
+# %%
+window = lazy_rec.slice(t0, t0 + 1.0)
+for bs in (0.02, 0.05, 0.10):
+    Xb = bin_spikes(window.spikes, num_units=len(window.units), bin_size=bs)
+    print(f"bin_size = {bs:.2f} s  ->  X shape {tuple(Xb.shape)}  (bins x units)")
+
+# %% [markdown]
+# The same idea extends to context length, augmentation, unit selection, and
+# sampling jitter: each is a one-line change to the pipeline. The appendix,
+# *Why this framework is powerful*, works through them.
+
+# %% [markdown]
+# <!-- =====================================================================
+#  END OF THE REWORKED "A First Look at the Data" FLOW.
+#
+#  Everything below is the PREVIOUS version of this section, kept for now.
+#  When removing it, delete the old exploratory cells (the _peek_ds print,
+#  "The full session and its causal split", "The behavioral covariates",
+#  "Spikes, and how a sample is carved out", and "The materialized sample"),
+#  BUT KEEP the IBLBrainWideMap2025 class definition below: the rest of the
+#  notebook (datasets, samplers, training) still imports and uses it.
+# ===================================================================== -->
+
 # %%
 from torch_brain.datasets import Dataset as BaseDataset
 
