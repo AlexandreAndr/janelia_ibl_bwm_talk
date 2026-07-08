@@ -262,10 +262,10 @@ display(
 from bokeh.io import output_notebook, show
 from bokeh.layouts import column
 from bokeh.models import (
-    BasicTicker,
     BoxZoomTool,
     ColumnDataSource,
     DatetimeTickFormatter,
+    FixedTicker,
     PanTool,
     Range1d,
     ResetTool,
@@ -309,6 +309,18 @@ def _time_only_formatter():
     )
 
 
+def _nice_step(raw_step):
+    """Round a raw tick step up to a clean 1/2/5 x 10^n value."""
+    if raw_step <= 0:
+        return 1.0
+    exponent = np.floor(np.log10(raw_step))
+    base = 10.0**exponent
+    for m in (1, 2, 5, 10):
+        if raw_step <= m * base:
+            return m * base
+    return 10.0 * base
+
+
 def plot_spikes(spikes, x_range=None, width=800, height=400):
     """Raster of an event stream, from spikes.timestamps and spikes.unit_index."""
     if x_range is None:
@@ -337,11 +349,6 @@ def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
               tools=tools, active_drag=pan, active_scroll=wheel_zoom)
     p.xaxis.formatter = _time_only_formatter()
     p.axis.minor_tick_line_color = None
-    # Fix the tick count so the wheel/whisker/paw panels all show the same
-    # number of horizontal gridlines, even though their y ranges/units differ.
-    y_ticker = BasicTicker(desired_num_ticks=4)
-    p.yaxis.ticker = y_ticker
-    p.ygrid.ticker = y_ticker
     x_values = data.timestamps * 1e3
     y_values = getattr(data, field)
     # Insert NaNs at each domain edge so the line breaks over gaps instead of
@@ -354,6 +361,27 @@ def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
     if y_values.ndim == 2:
         assert index is not None, "index is required for a 2D field"
         y_values = y_values[:, index]
+    # Fix the y range and its ticks (rather than let Bokeh auto-pick a "nice"
+    # step per panel) so the wheel/whisker/paw panels all draw the same
+    # number of evenly spaced horizontal gridlines, even though their data
+    # ranges/units differ. BasicTicker's desired_num_ticks is only a hint and
+    # still yields different counts per panel, hence the explicit FixedTicker.
+    # The step is rounded to a clean 1/2/5 x 10^n value (via _nice_step)
+    # instead of a raw division, so labels read e.g. "2000" not "1613.33".
+    NUM_YTICKS = 4
+    n_intervals = NUM_YTICKS - 1
+    y_max = float(np.nanmax(y_values))
+    if not np.isfinite(y_max) or y_max <= 0:
+        y_max = 1.0
+    step = _nice_step(y_max / n_intervals)
+    y_top = step * n_intervals
+    y_ticks = [i * step for i in range(NUM_YTICKS)]
+    # A small bottom pad (rather than starting the range at exactly 0) keeps
+    # the trace from sitting flush on the x-axis line, matching Bokeh's usual
+    # default breathing room below the data.
+    p.y_range = Range1d(-0.04 * y_top, y_top)
+    p.yaxis.ticker = FixedTicker(ticks=y_ticks)
+    p.ygrid.ticker = FixedTicker(ticks=y_ticks)
     source = ColumnDataSource(data=dict(x=x_values, y=y_values))
     p.line(x="x", y="y", source=source, line_width=2, color="green")
     return p
