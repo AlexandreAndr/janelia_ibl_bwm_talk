@@ -261,7 +261,7 @@ display(
 # Each accepts an x_range so several panels can be locked to one shared time axis.
 from bokeh.io import output_notebook, show
 from bokeh.layouts import column
-from bokeh.models import ColumnDataSource, Range1d
+from bokeh.models import BoxZoomTool, ColumnDataSource, PanTool, Range1d, ResetTool, WheelZoomTool
 from bokeh.plotting import figure
 from bokeh.resources import INLINE
 
@@ -272,12 +272,31 @@ from bokeh.resources import INLINE
 output_notebook(resources=INLINE, hide_banner=True)
 
 
+def _x_only_tools():
+    """Fresh pan/wheel-zoom/box-zoom tools restricted to the x (time) axis.
+
+    Each figure needs its own tool instances (Bokeh does not allow sharing a
+    tool object across figures), so this is called once per panel. Restricting
+    dimensions="width" keeps every interaction (drag, scroll, box) from ever
+    touching a panel's y range, so the shared time axis is the only thing that
+    moves or rescales.
+    """
+    pan = PanTool(dimensions="width")
+    wheel_zoom = WheelZoomTool(dimensions="width")
+    box_zoom = BoxZoomTool(dimensions="width")
+    return [pan, wheel_zoom, box_zoom, ResetTool()], pan, wheel_zoom
+
+
 def plot_spikes(spikes, x_range=None, width=800, height=400):
     """Raster of an event stream, from spikes.timestamps and spikes.unit_index."""
     if x_range is None:
         x_range = (spikes.timestamps[0] * 1e3, spikes.timestamps[-1] * 1e3)
+    tools, pan, wheel_zoom = _x_only_tools()
     p = figure(x_axis_label="Time", y_axis_label="Unit index", width=width,
-               height=height, x_axis_type="datetime", x_range=x_range, title="Spikes")
+               height=height, x_axis_type="datetime", x_range=x_range, title="Spikes",
+               tools=tools, active_drag=pan, active_scroll=wheel_zoom)
+    p.ygrid.grid_line_color = None
+    p.yaxis.visible = False
     source = ColumnDataSource(data=dict(x=spikes.timestamps * 1e3, y=spikes.unit_index))
     p.scatter("x", "y", source=source, size=5, color="navy", alpha=0.5,
               marker="dash", angle=np.pi / 2)
@@ -289,8 +308,11 @@ def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
     """Line plot of one field of a time series, breaking the line over domain gaps."""
     if x_range is None:
         x_range = (data.timestamps[0] * 1e3, data.timestamps[-1] * 1e3)
+    tools, pan, wheel_zoom = _x_only_tools()
     p = figure(x_axis_label="Time", y_axis_label=y_axis_label or field, width=width,
-               height=height, x_axis_type="datetime", x_range=x_range)
+              height=height, x_axis_type="datetime", x_range=x_range,
+              tools=tools, active_drag=pan, active_scroll=wheel_zoom)
+    p.axis.minor_tick_line_color = None
     x_values = data.timestamps * 1e3
     y_values = getattr(data, field)
     # Insert NaNs at each domain edge so the line breaks over gaps instead of
@@ -311,9 +333,12 @@ def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
 def plot_intervals(*interval, x_range=None, title=None, width=800, height=200):
     """One row of rectangles per Interval passed (each rectangle is one start/end)."""
     colors = ["red", "blue", "green", "orange", "purple", "brown", "pink", "gray", "black"]
+    tools, pan, wheel_zoom = _x_only_tools()
     p = figure(title=title, x_axis_label="Time", x_range=x_range, y_axis_label="Intervals",
-               y_range=(-len(interval), 1), width=width, height=height, x_axis_type="datetime")
+               y_range=(-len(interval), 1), width=width, height=height, x_axis_type="datetime",
+               tools=tools, active_drag=pan, active_scroll=wheel_zoom)
     p.yaxis.visible = False
+    p.grid.grid_line_color = None
     for i, iv in enumerate(interval):
         centers = (iv.start + iv.end) / 2.0 * 1e3
         source = ColumnDataSource(data=dict(
@@ -362,12 +387,17 @@ def _thin(obj, field, target=4000):
 
 # One shared time range links every panel: Bokeh's equivalent of sharex=True.
 # Times are passed in milliseconds because the helpers use a datetime x axis.
-shared_x = Range1d(0.0, T_END * 1e3)
+# Start zoomed in on the first slice of the session rather than the full ~65
+# min recording; bounds keeps pan/zoom from ever leaving the session's extent,
+# and the reset tool snaps back to this default window.
+DEFAULT_ZOOM_S = 300  # 5 minutes
+shared_x = Range1d(
+    0.0, min(DEFAULT_ZOOM_S, T_END) * 1e3, bounds=(0.0, T_END * 1e3)
+)
 W = 900
 
 p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=360)
 p_raster.title.text = f"One recording, one shared clock ({len(keep)} of {n_units} neurons)"
-p_raster.yaxis.axis_label = "neuron (subsampled)"
 
 p_trials = plot_intervals(
     ov_rec.trials, x_range=shared_x, title="task trials", width=W, height=80
@@ -458,9 +488,9 @@ lazy_rec = BaseDataset(
 # (i) Load a SINGLE attribute: just the wheel speed, and nothing else.
 t = time.time()
 wheel_speed = np.asarray(lazy_rec.wheel.speed)
-dt = (time.time() - t) * 1e3
+dt_full = (time.time() - t) * 1e3
 print(
-    f"(i) load wheel.speed only:   {dt:6.2f} ms   "
+    f"(i) load wheel.speed only:   {dt_full:6.2f} ms   "
     f"({wheel_speed.nbytes / 1e6:.2f} MB, the whole 65 min at 50 Hz)"
 )
 
@@ -470,11 +500,17 @@ t0 = float(np.asarray(mv.start)[10])
 t = time.time()
 window = lazy_rec.slice(t0, t0 + 1.0)  # crop every modality to [t0, t0 + 1 s]
 X = bin_spikes(window.spikes, num_units=len(window.units), bin_size=BIN_SIZE)
+t_wheel = time.time()
 y = np.asarray(window.wheel.speed)
+dt_wheel = (time.time() - t_wheel) * 1e3
 dt = (time.time() - t) * 1e3
 print(
-    f"(ii) slice one 1.0 s window: {dt:6.2f} ms   "
+    f"(ii) slice one 1.0 s window (spikes + wheel): {dt:6.2f} ms   "
     f"(X = {tuple(X.shape)} binned spikes, y = {y.shape} wheel speed)"
+)
+print(
+    f"     -> wheel.speed slice only:  {dt_wheel:6.2f} ms   "
+    f"({dt_full / dt_wheel:5.0f}x less time than loading the whole session)"
 )
 
 # %% [markdown]
