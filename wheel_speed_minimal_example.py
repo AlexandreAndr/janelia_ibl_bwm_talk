@@ -713,13 +713,6 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
         else:
             self._unit_filter = None
             self.num_units = len(self.get_unit_ids())
-        # Memo cache: the sampler draws the same fixed windows every epoch, and the
-        # binned spikes / wheel speed for a window never change. So bin each window
-        # once (epoch 1) and reuse the tensors afterwards, avoiding ~100x redundant
-        # HDF5 reads + binning.
-        self._cache: dict[
-            tuple[str, float, float], tuple[torch.Tensor, torch.Tensor]
-        ] = {}
 
     # Contract between Datasets and Samplers:
     # get_sampling_intervals() returns {recording_id: Interval} listing
@@ -742,11 +735,6 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 
     # `index` is a DatasetIndex(recording_id, start, end) produced by the sampler.
     def __getitem__(self, index: DatasetIndex):
-        # Return the cached tensors if we have already binned this exact window.
-        key = (index.recording_id, index.start, index.end)
-        if key in self._cache:
-            return self._cache[key]
-
         # Slice the recording to this sample's time window; all modalities
         # (.spikes, .units, .wheel.speed, ...) are cropped (lazily).
         recording = self.get_recording(index.recording_id)
@@ -766,7 +754,6 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
         Y = np.asarray(data.wheel.speed, dtype=np.float32)  # shape: (out_samples,)
         Y = torch.from_numpy(Y).unsqueeze(-1)  # shape: (out_samples, out_dim=1)
 
-        self._cache[key] = (X, Y)
         return X, Y
 
 
@@ -1228,10 +1215,6 @@ class IBLCovariateDataset(IBLBrainWideMap2025):
         self.attr = attr
 
     def __getitem__(self, index):
-        key = (index.recording_id, index.start, index.end)
-        if key in self._cache:
-            return self._cache[key]
-
         recording = self.get_recording(index.recording_id)
         data = recording.slice(index.start, index.end)
         if self._unit_filter is not None:
@@ -1245,7 +1228,6 @@ class IBLCovariateDataset(IBLBrainWideMap2025):
         Y = np.asarray(data.wheel.speed, dtype=np.float32)  # <-- replace this line
         Y = torch.from_numpy(Y).unsqueeze(-1)
 
-        self._cache[key] = (X, Y)
         return X, Y
 
 
@@ -1299,11 +1281,15 @@ print(f"Demo window starts at {DEMO_T0:.2f} s")
 # even one full modality) in RAM. That is what makes training over a 65-min
 # session, or scaling to many sessions, feasible at all.
 #
-# The catch (see the caching in `IBLBrainWideMap2025`): lazy is cheap *per
-# call* but you redo it *every epoch*. So the sweet spot is **lazy + selective
-# materialization**: never eagerly load the whole file, but cache the handful of
-# windows you actually sample, once. Lazy decides what you *never* load; the cache
-# decides what you load *only once*.
+# The catch: lazy is cheap *per call*, but `IBLBrainWideMap2025.__getitem__`
+# redoes the slice + bin on *every* epoch, since it does not cache. For this
+# tutorial's scale (a single session, ~1 ms per window) that is a deliberate
+# trade: a few extra seconds of redundant HDF5 reads and binning over a full
+# training run, in exchange for a `__getitem__` with no memoization state to
+# reason about. Memoizing the handful of windows a run actually samples (keyed
+# on `(recording_id, start, end)`) would trade that simplicity back for speed
+# if this were scaled to more sessions, more epochs, or heavier per-sample
+# processing.
 
 # %%
 import os
