@@ -263,8 +263,13 @@ from bokeh.io import output_notebook, show
 from bokeh.layouts import column
 from bokeh.models import ColumnDataSource, Range1d
 from bokeh.plotting import figure
+from bokeh.resources import INLINE
 
-output_notebook()  # render Bokeh output inline (in the notebook and rendered page)
+# resources=INLINE bakes BokehJS into the notebook output (and thus the rendered
+# HTML), so the GitHub Pages page needs no CDN at view time. This makes each page
+# larger (~4 MB) but fully self-contained. hide_banner drops the "BokehJS ...
+# loaded" message. Drop `resources=INLINE` to load from cdn.bokeh.org instead.
+output_notebook(resources=INLINE, hide_banner=True)
 
 
 def plot_spikes(spikes, x_range=None, width=800, height=400):
