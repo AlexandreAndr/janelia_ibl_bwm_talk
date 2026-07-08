@@ -513,12 +513,15 @@ eager_rec = BaseDataset(
 before = _rss_gb()
 t = time.time()
 full = eager_rec.materialize()  # read EVERYTHING into memory (what we avoid)
-dt = time.time() - t
+dt_materialize = time.time() - t
 after = _rss_gb()
 if before is not None:
-    print(f"materialize() into RAM:       {dt:5.2f} s   (+{after - before:4.2f} GB resident)")
+    print(
+        f"materialize() into RAM:       {dt_materialize:5.2f} s   "
+        f"(+{after - before:4.2f} GB resident)"
+    )
 else:
-    print(f"materialize() into RAM:       {dt:5.2f} s")
+    print(f"materialize() into RAM:       {dt_materialize:5.2f} s")
 
 # Drop it again so we do not carry ~1.8 GB through the rest of the notebook.
 del full, eager_rec
@@ -532,37 +535,42 @@ _ = gc.collect()
 # recording is memory-mapped, and you pay (bytes read, RAM used) only for the
 # attributes and time windows you actually access.
 #
-# Two examples, with their runtimes:
+# Two independent axes of savings, each measured on a fresh, lazily-opened
+# recording (reads no signals until accessed), against the `materialize()`
+# runtime above:
 
 # %%
-from torch_brain.utils import bin_spikes
-
-# A fresh, lazily-opened recording (reads no signals).
+# (i) Slice to a single 1.0 s window, THEN materialize it: every modality is
+#     still read, but only for that one second, not the full ~65 min session.
 lazy_rec = BaseDataset(
     dataset_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
     recording_ids=[RECORDING_ID],
 ).get_recording(RECORDING_ID)
 
-# (i) Load a SINGLE attribute: just the wheel speed, and nothing else.
-t = time.time()
-wheel_speed = np.asarray(lazy_rec.wheel.speed)
-dt_full = (time.time() - t) * 1e3
-print(
-    f"(i) load wheel.speed only:   {dt_full:6.2f} ms   "
-    f"({wheel_speed.nbytes / 1e6:.2f} MB, the whole 65 min at 50 Hz)"
-)
-
-# (ii) Load a SINGLE 1.0 s window of a SINGLE attribute: one training sample's
-#      worth of wheel speed, and nothing else.
 mv = lazy_rec.task_aligned_intervals.movement_intervals
 t0 = float(np.asarray(mv.start)[10])
+
 t = time.time()
-window = lazy_rec.slice(t0, t0 + 1.0)  # crop every modality to [t0, t0 + 1 s]
-y = np.asarray(window.wheel.speed)
-dt_wheel = (time.time() - t) * 1e3
+materialized_window = lazy_rec.slice(t0, t0 + 1.0).materialize()
+dt_slice = time.time() - t
 print(
-    f"(ii) slice one 1.0 s window, wheel.speed only: {dt_wheel:6.2f} ms   "
-    f"(y = {y.shape} wheel speed, {dt_full / dt_wheel:5.0f}x less time than loading the whole session)"
+    f"(i) slice 1.0 s window, then materialize(): {dt_slice * 1e3:6.2f} ms\n"
+    f"    -> {dt_materialize / dt_slice:6.0f}x less time than materializing the whole session"
+)
+
+# (ii) Access a single attribute (wheel speed) for the whole session: every
+#      time point is read, but only for that one modality, not the others.
+lazy_rec = BaseDataset(
+    dataset_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
+    recording_ids=[RECORDING_ID],
+).get_recording(RECORDING_ID)
+
+t = time.time()
+wheel_speed = np.asarray(lazy_rec.wheel.speed)
+dt_attr = time.time() - t
+print(
+    f"(ii) load wheel.speed only, whole session:  {dt_attr * 1e3:6.2f} ms\n"
+    f"    -> {dt_materialize / dt_attr:6.0f}x less time than materializing the whole session"
 )
 
 # %% [markdown]
@@ -595,6 +603,8 @@ print(
 # reprocessing.
 
 # %%
+from torch_brain.utils import bin_spikes
+
 window = lazy_rec.slice(t0, t0 + 1.0)
 for bs in (0.02, 0.05, 0.10):
     Xb = bin_spikes(window.spikes, num_units=len(window.units), bin_size=bs)
