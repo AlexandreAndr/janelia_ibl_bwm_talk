@@ -39,7 +39,7 @@
 #
 
 # %% [markdown]
-# ## Setup
+# # Setup
 #
 # Neuroscience datasets are usually distributed through a lab- or
 # consortium-specific API, here the IBL's own **ONE API**. `brainsets` is a
@@ -181,7 +181,7 @@ PIN_MEMORY = device.type == "cuda"
 print(f"Using {NUM_WORKERS} dataloader workers, pin_memory={PIN_MEMORY}")
 
 # %% [markdown]
-# ## A First Look at the Data
+# # A First Look at the Data
 #
 # Before building the dataset, let's see what a `brainsets` recording actually
 # *is*. Each session is a single, lazily-loaded object that holds every modality
@@ -226,7 +226,7 @@ display(
 )
 
 # %% [markdown]
-# ### The building blocks
+# ## The building blocks
 #
 # A recording is assembled from just five container types. Recognising them is
 # enough to navigate any `brainsets` session:
@@ -252,7 +252,7 @@ display(
 # a memory-mapped view of the file.
 
 # %% [markdown]
-# ### One session on a shared clock
+# ## One session on a shared clock
 #
 # Because every modality is indexed by the same clock, we can line them up in one
 # interactive figure and explore them together. The panels below share a single
@@ -580,7 +580,7 @@ del spk_t, spk_u, sub_t, sub_row, raster, ov_rec
 _ = gc.collect()
 
 # %% [markdown]
-# ### Lazy loading: pay only for what you touch
+# ## Lazy loading: pay only for what you touch
 #
 # This session is **~0.43 GB** on disk. Reading all of it into memory at once is
 # both possible and a bad idea: `materialize()` pulls every array into RAM, and
@@ -676,7 +676,7 @@ print(
 
 # %% [markdown]
 # ::: {.callout-tip}
-# ## Why this matters for neuro foundation models
+# # Why this matters for neuro foundation models
 #
 # - **Fast, minimal reads.** Each training step loads only the variables and the
 #   short time window the model needs, so a step touches megabytes, not gigabytes,
@@ -691,7 +691,7 @@ print(
 # :::
 
 # %% [markdown]
-# ### Transforms: deferring computation to each slice
+# ## Transforms: deferring computation to each slice
 #
 # That last point is exactly what a **transform** is: a small function applied to a
 # window right after the lazy slice and before the model, inside `__getitem__`.
@@ -717,7 +717,7 @@ for bs in (0.02, 0.05, 0.10):
 # *Why this framework is powerful*, works through them.
 
 # %% [markdown]
-# ## Dataset and DataLoader in PyTorch
+# # Dataset and DataLoader in PyTorch
 #
 # A `Dataset` answers two questions about your data:
 #
@@ -744,7 +744,7 @@ for bs in (0.02, 0.05, 0.10):
 # ```
 #
 # %% [markdown]
-# ## Defining a Simple & Custom Dataset
+# # Defining a Simple & Custom Dataset
 #
 # `IBLBrainWideMap2025` (defined above) is a `brainsets`-backed dataset for a
 # single recording. Two methods matter for the wheel-speed task:
@@ -879,7 +879,7 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 
 
 # %% [markdown]
-# ## Creating the Datasets, Samplers, and DataLoaders
+# # Creating the Datasets, Samplers, and DataLoaders
 #
 # 💡 This is where we come across the main pattern for creating data pipelines with TorchBrain:
 # - **Dataset** tells the sampler *where sampling is allowed*,
@@ -991,7 +991,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## The Model
+# # The Model
 #
 # Three small decoders are defined in the cells below: Linear, GRU, and TCN.
 #
@@ -1005,7 +1005,7 @@ plt.show()
 # and return `(batch, out_samples, out_dim)`.
 
 # %% [markdown]
-# ### Linear
+# ## Linear
 
 
 # %%
@@ -1029,7 +1029,7 @@ class Linear(nn.Module):
 
 
 # %% [markdown]
-# ### GRU
+# ## GRU
 
 
 # %%
@@ -1072,7 +1072,7 @@ class GRU(nn.Module):
 
 
 # %% [markdown]
-# ### TCN
+# ## TCN
 
 
 # %%
@@ -1122,7 +1122,7 @@ class TCN(nn.Module):
 
 
 # %% [markdown]
-# ### Instantiating the model
+# ## Instantiating the model
 
 # %%
 model = TCN(  # try: Linear, GRU, TCN
@@ -1137,7 +1137,7 @@ print(f"\nTrainable parameters: {num_params:,}")
 print(model)
 
 # %% [markdown]
-# ## Training
+# # Training
 #
 # A standard PyTorch loop! MSE loss against the wheel speed, AdamW optimizer,
 # R² score on the validation set at the end of each epoch.
@@ -1175,7 +1175,7 @@ for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
         epoch_pbar.set_description(f"Val R²: {r2:.3f}")
 
 # %% [markdown]
-# ## Evaluation
+# # Evaluation
 #
 # Plot the R² curve over training and compare predicted vs. actual wheel speed
 # on one validation trial.
@@ -1212,7 +1212,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## Final Test Evaluation
+# # Final Test Evaluation
 #
 # The **test** split is the *late* portion of the session (the causal split), held
 # out from training and model selection. We score it exactly **once**, here, to get
@@ -1354,7 +1354,7 @@ DEMO_T0 = float(demo_iv.start[10])
 print(f"Demo window starts at {DEMO_T0:.2f} s")
 
 # %% [markdown]
-# ## 1. Lazy loading and the time gain
+# # 1. Lazy loading and the time gain
 #
 # A `brainsets` recording is memory-mapped: `data.slice(start, end)` reads only
 # the bytes for the window you ask for. You open a session in milliseconds
@@ -1405,7 +1405,7 @@ print(
 )
 
 # %% [markdown]
-# ## 2. Change the bin size
+# # 2. Change the bin size
 #
 # Binning is one parameter. Finer bins give more temporal resolution but a
 # higher-dimensional, sparser input; coarser bins regularize. The model still
@@ -1431,7 +1431,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## 3. Longer or shorter context window
+# # 3. Longer or shorter context window
 #
 # The context window is how much time each sample spans; it lives in the
 # sampler/slice length, not in the data. A 2.0 s window simply yields 100 target
@@ -1451,7 +1451,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## 4. Augmentation via composable transforms
+# # 4. Augmentation via composable transforms
 #
 # Transforms attach with `transform=` and chain with `Compose`; they run inside
 # `__getitem__`, so augmentation is re-drawn every epoch. Here a random 0.8 s crop
@@ -1479,7 +1479,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## 5. Mask or select units
+# # 5. Mask or select units
 #
 # Units are a labelled axis, so you can drop or select them declaratively.
 # `UnitDropout` keeps a random subset each sample (augmentation / regularizer);
@@ -1513,7 +1513,7 @@ n_after = len(th_filter(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)).units)
 print(f"UnitFilter to thalamus: {n_before} -> {n_after} units")
 
 # %% [markdown]
-# ## 6. Sampling window with jitter
+# # 6. Sampling window with jitter
 #
 # `TrialSampler` emits the same fixed windows every epoch (reproducible eval).
 # `RandomFixedWindowSampler` applies a fresh random temporal jitter each epoch, so
