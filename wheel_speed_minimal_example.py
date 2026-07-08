@@ -178,7 +178,9 @@ print(f"Using device: {device}")
 # %% [markdown]
 # We start by opening a single session with the base `Dataset` and printing it.
 # What comes back is one object: some scalar metadata, plus a nested tree of typed
-# containers that hold every modality on a shared clock.
+# containers that hold every modality on a shared clock. The full print is
+# verbose, so it is tucked into a collapsible panel below; expand it to see the
+# whole tree.
 
 # %%
 from torch_brain.datasets import Dataset as BaseDataset
@@ -189,7 +191,25 @@ peek_ds = BaseDataset(
     recording_ids=[RECORDING_ID],
 )
 recording = peek_ds.get_recording(RECORDING_ID)
-print(recording)
+
+# The full object is long, so render it inside a collapsible <details> panel
+# (works in the rendered site and in Colab/Jupyter). We HTML-escape the repr
+# because it contains angle brackets (e.g. "<HDF5 dataset ...>").
+import html
+
+from IPython.display import HTML, display
+
+_repr = repr(recording)
+_n_lines = _repr.count("\n") + 1
+display(
+    HTML(
+        "<details><summary style='cursor:pointer'>"
+        f"Show the full recording object (Data(...), {_n_lines} lines)"
+        "</summary>"
+        "<pre style='max-height:22em;overflow:auto;font-size:0.8em;line-height:1.3'>"
+        f"{html.escape(_repr)}</pre></details>"
+    )
+)
 
 # %% [markdown]
 # ### The building blocks
