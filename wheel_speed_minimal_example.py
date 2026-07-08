@@ -780,6 +780,7 @@ for bs in (0.02, 0.05, 0.10):
 # training all three decoders below take noticeably less time.
 #
 # %%
+#| code-fold: false
 from pathlib import Path
 from typing import Literal, TypeAlias
 
