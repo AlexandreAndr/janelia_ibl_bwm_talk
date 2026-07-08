@@ -134,7 +134,7 @@ EPOCHS = 200
 # LR in {1e-4, 3e-4, 1e-3, 3e-3, 1e-2} x BIN_SIZE in {0.01, 0.02, 0.05, 0.1},
 # selected by validation R² for the TCN at 200 epochs (val 0.50, test 0.30).
 LR = 1e-4
-NUM_WORKERS = 16  # set high for a many-core machine; on Colab (~2 vCPUs) use 2
+NUM_WORKERS = 2  # set high for a many-core machine; on Colab (~2 vCPUs) use 2
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # The TCN's Conv1d layers see fixed input shapes, so let cuDNN autotune kernels.
