@@ -127,12 +127,11 @@ from tqdm.auto import tqdm
 # Hyperparameters (feel free to play with these)
 BIN_SIZE = 0.05  # seconds -> 20 spike bins over the 1.0 s context window
 BATCH_SIZE = 64
-EPOCHS = 200
+EPOCHS = 100
 # LR and BIN_SIZE below are the best of a grid over
 # LR in {1e-4, 3e-4, 1e-3, 3e-3, 1e-2} x BIN_SIZE in {0.01, 0.02, 0.05, 0.1},
 # selected by validation R² for the TCN at 200 epochs (val 0.50, test 0.30).
 LR = 1e-4
-NUM_WORKERS = 2  # set high for a many-core machine; on Colab (~2 vCPUs) use 2
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # The TCN's Conv1d layers see fixed input shapes, so let cuDNN autotune kernels.
@@ -254,8 +253,7 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
         # Memo cache: the sampler draws the same fixed windows every epoch, and the
         # binned spikes / wheel speed for a window never change. So bin each window
         # once (epoch 1) and reuse the tensors afterwards, avoiding ~100x redundant
-        # HDF5 reads + binning. With num_workers>0 the cache lives per-worker, so
-        # keep persistent_workers=True (set below) for it to survive across epochs.
+        # HDF5 reads + binning.
         self._cache: dict[
             tuple[str, float, float], tuple[torch.Tensor, torch.Tensor]
         ] = {}
@@ -554,11 +552,6 @@ plt.show()
 from torch.utils.data import DataLoader  # standard PyTorch loader
 from torch_brain.samplers import TrialSampler
 
-# pin_memory only helps when copying to a GPU; persistent_workers avoids
-# re-spawning the worker processes every epoch (worth it on Colab).
-PIN_MEMORY = device.type == "cuda"
-PERSISTENT_WORKERS = NUM_WORKERS > 0
-
 train_ds = IBLBrainWideMap2025(
     DATA_ROOT, split="train", bin_size=BIN_SIZE, recording_id=RECORDING_ID
 )
@@ -573,9 +566,6 @@ train_loader = DataLoader(
     train_ds,
     batch_size=BATCH_SIZE,
     sampler=train_sampler,
-    num_workers=NUM_WORKERS,
-    pin_memory=PIN_MEMORY,
-    persistent_workers=PERSISTENT_WORKERS,
 )
 print(f"Number of units: {train_ds.num_units}")
 print(f"Number of training samples: {len(train_sampler)}")
@@ -589,9 +579,6 @@ val_loader = DataLoader(
     val_ds,
     batch_size=BATCH_SIZE,
     sampler=val_sampler,
-    num_workers=NUM_WORKERS,
-    pin_memory=PIN_MEMORY,
-    persistent_workers=PERSISTENT_WORKERS,
 )
 print(f"Number of validation samples: {len(val_sampler)}")
 
@@ -606,9 +593,6 @@ test_loader = DataLoader(
     test_ds,
     batch_size=BATCH_SIZE,
     sampler=test_sampler,
-    num_workers=NUM_WORKERS,
-    pin_memory=PIN_MEMORY,
-    persistent_workers=PERSISTENT_WORKERS,
 )
 print(f"Number of test samples: {len(test_sampler)}")
 
