@@ -97,6 +97,7 @@ if IN_COLAB:
             "torch-brain==0.2.0",
             "tqdm",
             "huggingface_hub",
+            "bokeh",
         ],
         check=True,
     )
@@ -239,14 +240,87 @@ display(
 # %% [markdown]
 # ### One session on a shared clock
 #
-# Because every modality is indexed by the same clock, we can line them up in a
-# single figure: the spiking of all neurons (top, with units subsampled and their
-# spikes thinned so a 65 min raster stays legible), the task trials, and three of
-# the behavioral signals. This is the whole recording at a glance, and the raw
-# material each training sample is later carved from.
+# Because every modality is indexed by the same clock, we can line them up in one
+# interactive figure and explore them together. The panels below share a single
+# time axis (Bokeh's equivalent of matplotlib's `sharex`), so panning or zooming
+# any panel moves all of them in lockstep: the spiking of all neurons (top, with
+# units subsampled and their spikes thinned so a 65 min view stays responsive),
+# the task trials, and three behavioral signals. This is the whole recording at a
+# glance, and the raw material each training sample is later carved from.
+#
+# Use the toolbar (wheel zoom, box zoom, pan, reset) to drill into any stretch of
+# the session. Because Bokeh draws every point in the browser, the raster and the
+# 50 Hz signals are thinned for this overview; zoom in later to see a training
+# window at full resolution.
+
+# %%
+#| code-fold: true
+#| code-summary: "Bokeh plotting helpers (spikes, intervals, time series)"
+# Small, reusable Bokeh helpers in the same style as the torch-brain tutorials:
+# one for an event raster, one for a labelled-interval strip, one for a line.
+# Each accepts an x_range so several panels can be locked to one shared time axis.
+from bokeh.io import output_notebook, show
+from bokeh.layouts import column
+from bokeh.models import ColumnDataSource, Range1d
+from bokeh.plotting import figure
+
+output_notebook()  # render Bokeh output inline (in the notebook and rendered page)
+
+
+def plot_spikes(spikes, x_range=None, width=800, height=400):
+    """Raster of an event stream, from spikes.timestamps and spikes.unit_index."""
+    if x_range is None:
+        x_range = (spikes.timestamps[0] * 1e3, spikes.timestamps[-1] * 1e3)
+    p = figure(x_axis_label="Time", y_axis_label="Unit index", width=width,
+               height=height, x_axis_type="datetime", x_range=x_range, title="Spikes")
+    source = ColumnDataSource(data=dict(x=spikes.timestamps * 1e3, y=spikes.unit_index))
+    p.scatter("x", "y", source=source, size=5, color="navy", alpha=0.5,
+              marker="dash", angle=np.pi / 2)
+    return p
+
+
+def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
+                     width=800, height=200):
+    """Line plot of one field of a time series, breaking the line over domain gaps."""
+    if x_range is None:
+        x_range = (data.timestamps[0] * 1e3, data.timestamps[-1] * 1e3)
+    p = figure(x_axis_label="Time", y_axis_label=y_axis_label or field, width=width,
+               height=height, x_axis_type="datetime", x_range=x_range)
+    x_values = data.timestamps * 1e3
+    y_values = getattr(data, field)
+    # Insert NaNs at each domain edge so the line breaks over gaps instead of
+    # interpolating straight across them.
+    pad = np.nan * np.ones((len(data.domain), *y_values.shape[1:]))
+    x_values = np.concatenate([x_values, data.domain.start * 1e3, data.domain.end * 1e3])
+    y_values = np.concatenate([y_values, pad, pad])
+    order = np.argsort(x_values)
+    x_values, y_values = x_values[order], y_values[order]
+    if y_values.ndim == 2:
+        assert index is not None, "index is required for a 2D field"
+        y_values = y_values[:, index]
+    source = ColumnDataSource(data=dict(x=x_values, y=y_values))
+    p.line(x="x", y="y", source=source, line_width=2, color="green")
+    return p
+
+
+def plot_intervals(*interval, x_range=None, title=None, width=800, height=200):
+    """One row of rectangles per Interval passed (each rectangle is one start/end)."""
+    colors = ["red", "blue", "green", "orange", "purple", "brown", "pink", "gray", "black"]
+    p = figure(title=title, x_axis_label="Time", x_range=x_range, y_axis_label="Intervals",
+               y_range=(-len(interval), 1), width=width, height=height, x_axis_type="datetime")
+    p.yaxis.visible = False
+    for i, iv in enumerate(interval):
+        centers = (iv.start + iv.end) / 2.0 * 1e3
+        source = ColumnDataSource(data=dict(
+            x=centers, width=(iv.end - iv.start) * 1e3, y=np.zeros_like(centers) - i))
+        p.rect(x="x", y="y", width="width", height=0.8, source=source,
+               fill_color=colors[i % len(colors)], line_color="black", alpha=0.5)
+    return p
+
 
 # %%
 import gc
+from types import SimpleNamespace
 
 # A fresh handle just for this overview (all reads below are lazy).
 ov_rec = BaseDataset(
@@ -259,67 +333,57 @@ spk_t = np.asarray(ov_rec.spikes.timestamps)
 spk_u = np.asarray(ov_rec.spikes.unit_index)
 n_units = len(ov_rec.units.id)
 
-# Subsample ~90 units and thin each unit's spikes 5x, so a 65 min raster reads.
-keep = np.arange(0, n_units, max(1, n_units // 90))
-row_of = {u: i for i, u in enumerate(keep)}
+# Bokeh draws every point in the browser (no rasterization), so for a 65 min
+# overview we thin hard: keep ~70 units and cap the raster near a fixed glyph
+# budget. Panning/zooming still works, and every panel moves together.
+GLYPH_BUDGET = 20_000
+keep = np.arange(0, n_units, max(1, n_units // 70))
 m = np.isin(spk_u, keep)
-spk_t, spk_row = spk_t[m], np.array([row_of[u] for u in spk_u[m]])
-raster = [spk_t[spk_row == r][::5] for r in range(len(keep))]
+sub_t = spk_t[m]
+sub_row = np.searchsorted(keep, spk_u[m])  # kept unit id -> compact row index
+stride = max(1, len(sub_t) // GLYPH_BUDGET)
+raster = SimpleNamespace(timestamps=sub_t[::stride], unit_index=sub_row[::stride])
 
-tr_s, tr_e = np.asarray(ov_rec.trials.start), np.asarray(ov_rec.trials.end)
-signals = [
-    ("wheel", "speed", "wheel\nspeed"),
-    ("whisker", "motion_energy", "whisker\nME"),
-    ("paws", "left_paw_speed", "L paw\nspeed"),
-]
 
-fig, axes = plt.subplots(
-    2 + len(signals),
-    1,
-    figsize=(11, 6.8),
-    sharex=True,
-    gridspec_kw={"height_ratios": [3, 0.35] + [1] * len(signals)},
+def _thin(obj, field, target=4000):
+    """Stride a 50 Hz signal down to ~target points for a light overview line."""
+    ts = np.asarray(obj.timestamps)
+    y = np.asarray(getattr(obj, field))
+    s = max(1, len(ts) // target)
+    sh = SimpleNamespace(timestamps=ts[::s], domain=obj.domain)
+    setattr(sh, field, y[::s])
+    return sh
+
+
+# One shared time range links every panel: Bokeh's equivalent of sharex=True.
+# Times are passed in milliseconds because the helpers use a datetime x axis.
+shared_x = Range1d(0.0, T_END * 1e3)
+W = 900
+
+p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=360)
+p_raster.title.text = f"One recording, one shared clock ({len(keep)} of {n_units} neurons)"
+p_raster.yaxis.axis_label = "neuron (subsampled)"
+
+p_trials = plot_intervals(
+    ov_rec.trials, x_range=shared_x, title="task trials", width=W, height=80
 )
-axes[0].eventplot(
-    raster,
-    colors="k",
-    lineoffsets=list(range(len(keep))),
-    linelengths=1.0,
-    linewidths=0.5,
-    alpha=0.7,
-    rasterized=True,
-)
-axes[0].set_ylim(0, len(keep))
-axes[0].set_yticks([0, len(keep)])
-axes[0].set_ylabel(f"neurons\n({len(keep)} of {n_units})", fontsize=9)
-axes[0].set_title("One recording, one shared clock: spikes, task trials, and behavior")
 
-# task trials as their own strip (each bar is one trial)
-axes[1].broken_barh(
-    list(zip(tr_s, tr_e - tr_s)), (0.15, 0.7), facecolors="#4C72B0", alpha=0.8
-)
-axes[1].set_ylim(0, 1)
-axes[1].set_yticks([])
-axes[1].set_ylabel("trials", fontsize=9, rotation=0, ha="right", va="center")
+p_wheel = plot_time_series(_thin(ov_rec.wheel, "speed"), "speed", x_range=shared_x,
+                           y_axis_label="wheel speed", width=W, height=130)
+p_whisk = plot_time_series(_thin(ov_rec.whisker, "motion_energy"), "motion_energy",
+                           x_range=shared_x, y_axis_label="whisker ME", width=W, height=130)
+p_paw = plot_time_series(_thin(ov_rec.paws, "left_paw_speed"), "left_paw_speed",
+                         x_range=shared_x, y_axis_label="L paw speed", width=W, height=130)
 
-for ax, (ns, attr, lab) in zip(axes[2:], signals):
-    obj = getattr(ov_rec, ns)
-    ax.plot(
-        np.asarray(obj.timestamps),
-        np.asarray(getattr(obj, attr)),
-        lw=0.45,
-        color="#333333",
-    )
-    ax.set_ylabel(lab, fontsize=9)
-    ax.margins(x=0)
+# Only the bottom panel needs to show the (shared) time axis.
+for p in (p_raster, p_trials, p_wheel, p_whisk):
+    p.xaxis.visible = False
+p_paw.xaxis.axis_label = "time in session"
 
-axes[-1].set_xlim(0, T_END)
-axes[-1].set_xlabel("Time in session (s)")
-plt.tight_layout()
-plt.show()
+show(column(p_raster, p_trials, p_wheel, p_whisk, p_paw))
 
-# Free the spike arrays we pulled in just for the plot (~0.9 GB).
-del spk_t, spk_u, spk_row, raster, ov_rec
+# Free the spike arrays we pulled in just for the plot.
+del spk_t, spk_u, sub_t, sub_row, raster, ov_rec
 _ = gc.collect()
 
 # %% [markdown]

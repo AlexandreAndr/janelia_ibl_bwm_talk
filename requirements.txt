@@ -6,3 +6,4 @@
 torch-brain==0.2.0
 tqdm
 huggingface_hub
+bokeh
