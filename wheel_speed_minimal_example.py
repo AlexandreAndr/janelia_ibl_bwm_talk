@@ -262,6 +262,7 @@ display(
 from bokeh.io import output_notebook, show
 from bokeh.layouts import column
 from bokeh.models import (
+    BasicTicker,
     BoxZoomTool,
     ColumnDataSource,
     DatetimeTickFormatter,
@@ -336,6 +337,11 @@ def plot_time_series(data, field, index=None, x_range=None, y_axis_label=None,
               tools=tools, active_drag=pan, active_scroll=wheel_zoom)
     p.xaxis.formatter = _time_only_formatter()
     p.axis.minor_tick_line_color = None
+    # Fix the tick count so the wheel/whisker/paw panels all show the same
+    # number of horizontal gridlines, even though their y ranges/units differ.
+    y_ticker = BasicTicker(desired_num_ticks=4)
+    p.yaxis.ticker = y_ticker
+    p.ygrid.ticker = y_ticker
     x_values = data.timestamps * 1e3
     y_values = getattr(data, field)
     # Insert NaNs at each domain edge so the line breaks over gaps instead of
