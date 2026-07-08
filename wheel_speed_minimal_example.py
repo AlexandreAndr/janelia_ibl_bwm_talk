@@ -26,7 +26,8 @@
 # [🐍 ONE API](https://int-brain-lab.github.io/ONE/){.btn .btn-outline-primary .btn-sm target="_blank"}
 # [🧠 Interactive viz](https://viz.internationalbrainlab.org){.btn .btn-outline-primary .btn-sm target="_blank"}
 #
-# By working through this tutorial, you will learn how to
+# By working through this tutorial, you will learn how to:
+#
 # 1. Build a custom `Dataset` on top of a `brainsets` recording, so any
 #    pre-processed session becomes trainable with a few lines of code.
 # 2. Sample fixed-length trials around a decision-making task using
