@@ -174,6 +174,17 @@ print(f"Using device: {device}")
 # on one shared time axis: the spikes of all recorded neurons, plus behavioral
 # covariates (wheel, whisker, paws) and the trial structure.
 #
+
+# %%
+from torch_brain.datasets import Dataset as BaseDataset
+
+_peek_ds = BaseDataset(
+    dataset_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
+    recording_ids=[RECORDING_ID],
+)
+print(_peek_ds.get_recording(RECORDING_ID))
+
+# %% [markdown]
 # **Materialize vs. load.** `brainsets prepare` converts the raw IBL session into
 # one HDF5 file on disk (~1.9 GB for this session). We never load all of that:
 # the `Dataset` opens the file and `data.slice(start, end)` reads back only the
