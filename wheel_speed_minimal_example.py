@@ -56,7 +56,7 @@
 # falls in that latter category: a plain-Python `brainsets` pipeline kept
 # alongside this notebook as a worked example of the real flow, for anyone
 # curious how a raw IBL session gets turned into the standardized HDF5 format.
-# Running it requires ONE API credentials and downloads/processes ~5.5 GB of
+# Running it downloads/processes ~5.5 GB of
 # raw data into a ~1.8 GB HDF5 file. For this tutorial we skip that step: the
 # cells below instead fetch the single, already-processed session straight
 # from the Hugging Face Hub (public, no login required), so you can get
