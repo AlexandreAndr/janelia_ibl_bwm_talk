@@ -26,8 +26,8 @@
 #
 # It is a transparent, **self-contained** example (everything it needs lives in
 # this one folder) that shows how to
-# 1. Build a custom `Dataset` on top of a `brainsets` recording (here by
-#    subclassing the vendored base dataset in `dataset.py`).
+# 1. Build a custom `Dataset` on top of a `brainsets` recording (defined
+#    directly below, self-contained in this script).
 # 2. Sample fixed-length trials around the decision-making task using `TrialSampler`.
 # 3. Train one of three small decoders (a linear readout, a bidirectional GRU, or a dilated TCN).
 #
@@ -54,9 +54,10 @@
 # the processed h5 ~1.8 GB. See this folder's `README.md` for details.
 
 # %%
-# Running in Google Colab: clone this repo and install its pinned deps first.
-# Colab starts from a blank runtime, so it has neither `dataset.py` / the
-# vendored pipeline nor the packages this notebook needs.
+# Running in Google Colab: install this notebook's pinned deps first. Colab
+# starts from a blank runtime, so it has none of the packages this notebook
+# needs; the session data itself is fetched separately from Hugging Face Hub
+# below, so no repo checkout is required.
 import os
 import subprocess
 import sys
@@ -69,25 +70,54 @@ except ImportError:
     IN_COLAB = False
 
 if IN_COLAB:
-    REPO_DIR = "janelia_ibl_bwm_talk"
-    if not os.path.isdir(REPO_DIR):
-        subprocess.run(
-            ["git", "clone", "--depth", "1",
-             "https://github.com/AlexandreAndr/janelia_ibl_bwm_talk.git", REPO_DIR],
-            check=True,
-        )
-    os.chdir(REPO_DIR)
+    # Keep this list in sync with requirements.txt.
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "torch-brain==0.2.0a0",
+            "torch==2.10.0",
+            "scikit-learn==1.7.2",
+            "matplotlib",
+            "tqdm",
+            "huggingface_hub",
+        ],
         check=True,
     )
 
 # %%
-# Make this folder importable so `from dataset import IBLBrainWideMap2025`
-# resolves the vendored dataset class next to this script.
-_HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+# This folder's own path, used to locate the local data dir regardless of cwd.
+_HERE = (
+    os.path.dirname(os.path.abspath(__file__))
+    if "__file__" in globals()
+    else os.getcwd()
+)
+
+# Which eval session to decode; the h5 lands under DATA_ROOT/DATASET_DIRNAME.
+DATA_ROOT = os.path.join(_HERE, "processed")
+DATASET_DIRNAME = "ibl_brain_wide_map_2025"
+RECORDING_ID = "0802ced5-33a3-405e-8336-b65ebc5cb07c"
+
+# %%
+# Fetch the pre-processed session (~1.9 GB) from the Hugging Face Hub instead of
+# running the raw IBL download + brainsets pipeline (~5.5 GB raw + processing
+# time). Skips the download if the file is already present locally (e.g. you
+# ran `brainsets prepare` yourself). To (re)build it from scratch instead, see
+# this folder's README.
+_session_path = os.path.join(DATA_ROOT, DATASET_DIRNAME, f"{RECORDING_ID}.h5")
+if not os.path.exists(_session_path):
+    from huggingface_hub import hf_hub_download
+
+    os.makedirs(os.path.dirname(_session_path), exist_ok=True)
+    hf_hub_download(
+        repo_id="AlexAndreUpenn/ibl-bwm-wheel-speed-demo",
+        repo_type="dataset",
+        filename=f"{RECORDING_ID}.h5",
+        local_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
+    )
 
 # %%
 import matplotlib.pyplot as plt
@@ -105,11 +135,6 @@ EPOCHS = 200
 # selected by validation R² for the TCN at 200 epochs (val 0.50, test 0.30).
 LR = 1e-4
 NUM_WORKERS = 16  # set high for a many-core machine; on Colab (~2 vCPUs) use 2
-
-# Which eval session to decode. This folder's pipeline downloads exactly this
-# session (see one_session_eid.txt); the h5 lands under DATA_ROOT below.
-DATA_ROOT = os.path.join(_HERE, "processed")
-RECORDING_ID = "0802ced5-33a3-405e-8336-b65ebc5cb07c"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # The TCN's Conv1d layers see fixed input shapes, so let cuDNN autotune kernels.
@@ -131,14 +156,163 @@ print(f"Using device: {device}")
 # on a laptop practical.
 
 # %%
+from pathlib import Path
+from typing import Literal, TypeAlias, get_args
+
+from torch_brain.dataset import Dataset, DatasetIndex, SpikingDatasetMixin
+from torch_brain.transforms import UnitFilter
 from torch_brain.utils import bin_spikes
 
-from dataset import IBLBrainWideMap2025
+Split: TypeAlias = Literal["train", "val", "test"]
 
-# The base class handles file I/O; here we open the session just to explore it.
-viz_ds = IBLBrainWideMap2025(
-    root=DATA_ROOT, recording_ids=RECORDING_ID, split=None
-)
+
+def good_units_mask(units):
+    """Keep KiloSort-good, >=1 Hz units on QC-passing probes (the 'filtered' set)."""
+    return (
+        (np.asarray(units.label) == 1.0)
+        & (np.asarray(units.firing_rate) >= 1.0)
+        & (np.asarray(units.qc_neural) == b"PASS")
+    )
+
+
+class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
+    """
+    Dataset for the IBL Brain-Wide Map (2025), for a single recording.
+
+    Args:
+        root: The root directory of the dataset.
+        dirname: The name of the dataset (and the directory containing its data).
+        recording_id: The recording id to load.
+        split: The split of the dataset (train, val, test), or None to skip
+            split-based interval filtering (e.g. when just exploring a recording).
+        bin_size: The spike-binning width in seconds. Only required when the
+            dataset is actually indexed (i.e. not for exploration-only use).
+        filter_units: Whether to restrict to good-quality units (see
+            `good_units_mask`).
+    """
+
+    # wheel speed is a 1D continuous signal, regularly sampled at BEHAVIOR_SFREQ (50 Hz).
+    out_dim = 1
+    spiking_dataset_mixin_uniquify_unit_ids = True
+    CONTEXT_WINDOW = 1.0  # seconds
+    BEHAVIOR_SFREQ = 50  # Hz
+
+    def __init__(
+        self,
+        root: str,
+        recording_id: str,
+        dirname: str = "ibl_brain_wide_map_2025",
+        split: Split | None = "train",
+        bin_size: float | None = None,
+        filter_units: bool = True,
+    ):
+        if split is not None and split not in get_args(Split):
+            raise ValueError(
+                f"split={split} not well defined, should be one of {get_args(Split)} or None"
+            )
+
+        # Single session used by this example (matches recording_ids.txt,
+        # kept for the local/brainsets-pipeline workflow described in the
+        # README).
+        all_recording_ids = ["0802ced5-33a3-405e-8336-b65ebc5cb07c"]
+        if recording_id not in all_recording_ids:
+            raise ValueError(f"{recording_id!r} not found in recording ids")
+
+        self.dataset_dir = Path(root) / dirname
+
+        super().__init__(
+            dataset_dir=self.dataset_dir,
+            recording_ids=[recording_id],
+            transform=None,
+            namespace_attributes=[
+                "session.id",
+                "subject.id",
+                "units.id",
+                "probes.id",
+            ],
+        )
+
+        # store some attributes that are useful later
+        self.split = split
+        self.recording_id = recording_id
+        self.bin_size = bin_size
+        self.out_sampling_rate = float(self.BEHAVIOR_SFREQ)  # 50 Hz
+        # Each sample spans CONTEXT_WINDOW seconds (1.0 s).
+        self.out_samples = round(self.CONTEXT_WINDOW * self.out_sampling_rate)  # 50
+        self.num_bins = (
+            round(self.CONTEXT_WINDOW / self.bin_size) if self.bin_size else None
+        )  # 20 at 0.05 s
+
+        # Move from the unfiltered population to the filtered (good-quality) units.
+        # UnitFilter drops the spikes of non-kept units and reindexes, so downstream
+        # binning just sees fewer units. num_units is the count the model will get.
+        units = self.get_recording(recording_id).units
+        if filter_units:
+            self._unit_filter = UnitFilter(mask_fn=good_units_mask, field="spikes")
+            self.num_units = int(good_units_mask(units).sum())
+        else:
+            self._unit_filter = None
+            self.num_units = len(self.get_unit_ids())
+        # Memo cache: the sampler draws the same fixed windows every epoch, and the
+        # binned spikes / wheel speed for a window never change. So bin each window
+        # once (epoch 1) and reuse the tensors afterwards, avoiding ~100x redundant
+        # HDF5 reads + binning. With num_workers>0 the cache lives per-worker, so
+        # keep persistent_workers=True (set below) for it to survive across epochs.
+        self._cache: dict[
+            tuple[str, float, float], tuple[torch.Tensor, torch.Tensor]
+        ] = {}
+
+    # Contract between Datasets and Samplers:
+    # get_sampling_intervals() returns {recording_id: Interval} listing
+    # the windows the sampler may draw from.
+    # Sampler will emit one DatasetIndex per sample.
+    def get_sampling_intervals(self, *_args, **_kwargs):
+        rid = self.recording_id
+        recording = self.get_recording(rid)
+
+        # Trials aligned to the IBL decision-making task (each is a 1.0 s window).
+        intervals = recording.task_aligned_intervals.domain
+        # The dataset provides a causal 40/20/40 temporal train/val/test split;
+        # intersect with the requested split's domain.
+        intervals = intervals & getattr(recording, f"{self.split}_domain")
+        # Wheel decoding is scored within the movement window of each trial.
+        intervals = intervals & recording.task_aligned_intervals.movement_intervals
+        # And only where the wheel signal itself is defined.
+        intervals = intervals & recording.wheel._domain
+        return {rid: intervals}
+
+    # `index` is a DatasetIndex(recording_id, start, end) produced by the sampler.
+    def __getitem__(self, index: DatasetIndex):
+        # Return the cached tensors if we have already binned this exact window.
+        key = (index.recording_id, index.start, index.end)
+        if key in self._cache:
+            return self._cache[key]
+
+        # Slice the recording to this sample's time window; all modalities
+        # (.spikes, .units, .wheel.speed, ...) are cropped (lazily).
+        recording = self.get_recording(index.recording_id)
+        data = recording.slice(index.start, index.end)
+
+        # Keep only the good-quality units (no-op when filter_units=False).
+        if self._unit_filter is not None:
+            data = self._unit_filter(data)
+
+        # All models take (num_bins, num_units) and return (out_samples, out_dim).
+
+        # Spikes are an irregular event stream -> bin them into a regular grid.
+        X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
+        X = torch.from_numpy(X).float()  # shape: (num_bins, num_units)
+
+        # Wheel speed is already regularly sampled at 50 Hz. It is NOT normalized.
+        Y = np.asarray(data.wheel.speed, dtype=np.float32)  # shape: (out_samples,)
+        Y = torch.from_numpy(Y).unsqueeze(-1)  # shape: (out_samples, out_dim=1)
+
+        self._cache[key] = (X, Y)
+        return X, Y
+
+
+# The dataset class handles file I/O; here we open the session just to explore it.
+viz_ds = IBLBrainWideMap2025(root=DATA_ROOT, recording_id=RECORDING_ID, split=None)
 viz_rec = viz_ds.get_recording(RECORDING_ID)
 T_END = float(viz_rec.domain.end[-1])
 print(f"Session length: {T_END:.0f} s ({T_END / 60:.0f} min)")
@@ -169,18 +343,31 @@ for name, (dom, color) in splits.items():
 # task-aligned trial windows: where the decision-making task actually occurs
 ax.vlines(np.asarray(ti.start), 0.38, 0.62, color="#8172B3", lw=0.3, alpha=0.7)
 ax.text(
-    0, 0.66, f"{len(ti.start)} task trials", ha="left", va="bottom", fontsize=8, color="#8172B3"
+    0,
+    0.66,
+    f"{len(ti.start)} task trials",
+    ha="left",
+    va="bottom",
+    fontsize=8,
+    color="#8172B3",
 )
 # movement windows: the subset used as decoding samples
 ax.vlines(np.asarray(mi.start), 0.05, 0.29, color="k", lw=0.3, alpha=0.5)
 ax.text(
-    0, 0.33, f"{len(mi.start)} movement windows (1.0 s samples)", ha="left", va="bottom", fontsize=8
+    0,
+    0.33,
+    f"{len(mi.start)} movement windows (1.0 s samples)",
+    ha="left",
+    va="bottom",
+    fontsize=8,
 )
 ax.set_xlim(0, T_END)
 ax.set_ylim(0.0, 1.15)
 ax.set_yticks([])
 ax.set_xlabel("Time in session (s)")
-ax.set_title(f"One continuous {T_END / 60:.0f}-min session: causal train/val/test split")
+ax.set_title(
+    f"One continuous {T_END / 60:.0f}-min session: causal train/val/test split"
+)
 plt.tight_layout()
 plt.show()
 
@@ -198,11 +385,15 @@ T0, T1 = 44.0, 54.0  # a legible 30 s window inside the training split
 # recording leaves its lazy interval in a state that later breaks data.slice(),
 # so we keep viz_rec clean for the materialize step below.
 _go_rec = IBLBrainWideMap2025(
-    root=DATA_ROOT, recording_ids=RECORDING_ID, split=None
+    root=DATA_ROOT, recording_id=RECORDING_ID, split=None
 ).get_recording(RECORDING_ID)
 go = np.asarray(_go_rec.get_nested_attribute("trials.go_cue_time"))
 go = go[(go >= T0) & (go <= T1)]
-mv = [(s, e) for s, e in zip(np.asarray(mi.start), np.asarray(mi.end)) if s >= T0 and e <= T1]
+mv = [
+    (s, e)
+    for s, e in zip(np.asarray(mi.start), np.asarray(mi.end))
+    if s >= T0 and e <= T1
+]
 
 covariates = [
     ("wheel", "speed", "wheel speed"),
@@ -222,7 +413,9 @@ for ax, (ns, attr, label) in zip(axes, covariates):
         ax.axvline(g, color="#DD8452", lw=0.8, ls="--", alpha=0.7)
     ax.set_ylabel(label, fontsize=9)
     ax.margins(x=0)
-axes[0].set_title("Behavioral covariates (green = movement windows, orange dashed = go cue)")
+axes[0].set_title(
+    "Behavioral covariates (green = movement windows, orange dashed = go cue)"
+)
 axes[-1].set_xlabel("Time in session (s)")
 plt.tight_layout()
 plt.show()
@@ -285,7 +478,9 @@ ax.set_xlim(T0, T1)
 ax.set_ylim(0, len(keep))
 ax.set_xlabel("Time in session (s)")
 ax.set_ylabel(f"Unit (subsampled to {len(keep)} of {n_units})")
-ax.set_title("Spike raster: the sampler carves fixed windows out of the continuous stream")
+ax.set_title(
+    "Spike raster: the sampler carves fixed windows out of the continuous stream"
+)
 plt.tight_layout()
 plt.show()
 
@@ -304,9 +499,15 @@ Y_demo = np.asarray(sample.wheel.speed, dtype=np.float32)
 fig, axes = plt.subplots(1, 2, figsize=(11, 4), gridspec_kw={"width_ratios": [2, 1]})
 # log1p for contrast: per-bin counts are small, so raw values look nearly blank
 axes[0].imshow(
-    np.log1p(X_demo.T), aspect="auto", cmap="Greys", origin="lower", interpolation="nearest"
+    np.log1p(X_demo.T),
+    aspect="auto",
+    cmap="Greys",
+    origin="lower",
+    interpolation="nearest",
 )
-axes[0].set_title(f"X = binned spikes  ({X_demo.shape[0]} bins x {X_demo.shape[1]} units)")
+axes[0].set_title(
+    f"X = binned spikes  ({X_demo.shape[0]} bins x {X_demo.shape[1]} units)"
+)
 axes[0].set_xlabel(f"Time bin ({BIN_SIZE * 1000:.0f} ms)")
 axes[0].set_ylabel("Unit")
 tt = np.linspace(0, 1.0, len(Y_demo))
@@ -321,9 +522,8 @@ plt.show()
 # %% [markdown]
 # ## Defining a Simple & Custom Dataset
 #
-# This repo provides a `brainsets`-backed base dataset (in `dataset.py`) that
-# handles the file I/O for a recording. We subclass it and (re-)define the
-# two things every task needs:
+# `IBLBrainWideMap2025` (defined above) is a self-contained, `brainsets`-backed
+# dataset for a single recording. Two methods matter for the wheel-speed task:
 # - **`get_sampling_intervals`**: Decides *which* time windows count as samples.
 #   For wheel-speed decoding, each sample is a fixed **1.0 s** window drawn from
 #   the trials of the IBL decision-making task, restricted to the movement window
@@ -343,121 +543,7 @@ plt.show()
 # `qc_neural == PASS` (probe QC). For this session that is **1547 -> 358 units**.
 # Fewer, higher-quality units means a much lower-dimensional input, which
 # directly reduces the overfitting we saw with the full population.
-
-# %%
-from typing import Literal
-
-from torch_brain.dataset import DatasetIndex
-from torch_brain.transforms import UnitFilter
-from torch_brain.utils import bin_spikes
-
-from dataset import IBLBrainWideMap2025
-
-
-def good_units_mask(units):
-    """Keep KiloSort-good, >=1 Hz units on QC-passing probes (the 'filtered' set)."""
-    return (
-        (np.asarray(units.label) == 1.0)
-        & (np.asarray(units.firing_rate) >= 1.0)
-        & (np.asarray(units.qc_neural) == b"PASS")
-    )
-
-
-class SimpleIBLWheelSpeedDataset(IBLBrainWideMap2025):
-    # wheel speed is a 1D continuous signal, regularly sampled at BEHAVIOR_SFREQ (50 Hz).
-    out_dim = 1
-
-    def __init__(
-        self,
-        root: str,
-        split: Literal["train", "val", "test"],
-        bin_size: float,
-        recording_id: str,
-        filter_units: bool = True,
-    ):
-        # recording_ids picks which session to load. TS1-style tasks are single-session
-        # and live in the "eval" regime of the dataset.
-        assert split in ("train", "val", "test")
-        super().__init__(
-            root=root,
-            recording_ids=recording_id,
-            split=split,
-        )
-
-        # store some attributes that are useful later
-        self.recording_id = recording_id
-        self.bin_size = bin_size
-        self.out_sampling_rate = float(self.BEHAVIOR_SFREQ)  # 50 Hz
-        # Each sample spans CONTEXT_WINDOW seconds (1.0 s).
-        self.out_samples = round(self.CONTEXT_WINDOW * self.out_sampling_rate)  # 50
-        self.num_bins = round(self.CONTEXT_WINDOW / self.bin_size)  # 20 at 0.05 s
-
-        # Move from the unfiltered population to the filtered (good-quality) units.
-        # UnitFilter drops the spikes of non-kept units and reindexes, so downstream
-        # binning just sees fewer units. num_units is the count the model will get.
-        units = self.get_recording(recording_id).units
-        if filter_units:
-            self._unit_filter = UnitFilter(mask_fn=good_units_mask, field="spikes")
-            self.num_units = int(good_units_mask(units).sum())
-        else:
-            self._unit_filter = None
-            self.num_units = len(self.get_unit_ids())
-        # Memo cache: the sampler draws the same fixed windows every epoch, and the
-        # binned spikes / wheel speed for a window never change. So bin each window
-        # once (epoch 1) and reuse the tensors afterwards, avoiding ~100x redundant
-        # HDF5 reads + binning. With num_workers>0 the cache lives per-worker, so
-        # keep persistent_workers=True (set below) for it to survive across epochs.
-        self._cache: dict[tuple[str, float, float], tuple[torch.Tensor, torch.Tensor]] = {}
-
-    # Contract between Datasets and Samplers:
-    # get_sampling_intervals() returns {recording_id: Interval} listing
-    # the windows the sampler may draw from.
-    # Sampler will emit one DatasetIndex per sample.
-    def get_sampling_intervals(self, *_args, **_kwargs):
-        rid = self.recording_id
-        recording = self.get_recording(rid)
-
-        # Trials aligned to the IBL decision-making task (each is a 1.0 s window).
-        intervals = recording.task_aligned_intervals.domain
-        # The dataset provides a causal 40/20/40 temporal train/val/test split;
-        # intersect with the requested split's domain.
-        intervals = intervals & getattr(recording, f"{self.split}_domain")
-        # Wheel decoding is scored within the movement window of each trial.
-        intervals = intervals & recording.task_aligned_intervals.movement_intervals
-        # And only where the wheel signal itself is defined.
-        intervals = intervals & recording.wheel._domain
-        return {rid: intervals}
-
-    # `index` is a DatasetIndex(recording_id, start, end) produced by the sampler.
-    def __getitem__(self, index: DatasetIndex):
-        # Return the cached tensors if we have already binned this exact window.
-        key = (index.recording_id, index.start, index.end)
-        if key in self._cache:
-            return self._cache[key]
-
-        # Slice the recording to this sample's time window; all modalities
-        # (.spikes, .units, .wheel.speed, ...) are cropped (lazily).
-        recording = self.get_recording(index.recording_id)
-        data = recording.slice(index.start, index.end)
-
-        # Keep only the good-quality units (no-op when filter_units=False).
-        if self._unit_filter is not None:
-            data = self._unit_filter(data)
-
-        # All models take (num_bins, num_units) and return (out_samples, out_dim).
-
-        # Spikes are an irregular event stream -> bin them into a regular grid.
-        X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
-        X = torch.from_numpy(X).float()  # shape: (num_bins, num_units)
-
-        # Wheel speed is already regularly sampled at 50 Hz. It is NOT normalized.
-        Y = np.asarray(data.wheel.speed, dtype=np.float32)  # shape: (out_samples,)
-        Y = torch.from_numpy(Y).unsqueeze(-1)  # shape: (out_samples, out_dim=1)
-
-        self._cache[key] = (X, Y)
-        return X, Y
-
-
+#
 # %% [markdown]
 # ## Creating the Datasets, Samplers, and DataLoaders
 #
@@ -475,7 +561,7 @@ from torch_brain.samplers import TrialSampler
 PIN_MEMORY = device.type == "cuda"
 PERSISTENT_WORKERS = NUM_WORKERS > 0
 
-train_ds = SimpleIBLWheelSpeedDataset(
+train_ds = IBLBrainWideMap2025(
     DATA_ROOT, split="train", bin_size=BIN_SIZE, recording_id=RECORDING_ID
 )
 # We want to sample "one-trial-at-a-time", so we use the TrialSampler
@@ -497,7 +583,7 @@ print(f"Number of units: {train_ds.num_units}")
 print(f"Number of training samples: {len(train_sampler)}")
 
 # Validation Dataset, Sampler, and DataLoader
-val_ds = SimpleIBLWheelSpeedDataset(
+val_ds = IBLBrainWideMap2025(
     DATA_ROOT, split="val", bin_size=BIN_SIZE, recording_id=RECORDING_ID
 )
 val_sampler = TrialSampler(sampling_intervals=val_ds.get_sampling_intervals())
@@ -514,7 +600,7 @@ print(f"Number of validation samples: {len(val_sampler)}")
 # Test Dataset, Sampler, and DataLoader.
 # The test split is the *late* part of the session (causal split). We touch it
 # only once, for the final score after training/model selection is done.
-test_ds = SimpleIBLWheelSpeedDataset(
+test_ds = IBLBrainWideMap2025(
     DATA_ROOT, split="test", bin_size=BIN_SIZE, recording_id=RECORDING_ID
 )
 test_sampler = TrialSampler(sampling_intervals=test_ds.get_sampling_intervals())
@@ -531,7 +617,9 @@ print(f"Number of test samples: {len(test_sampler)}")
 print(f"Number of units:  {train_ds.num_units}")
 print(f"Bins per sample:  {train_ds.num_bins}  (bin size = {BIN_SIZE}s)")
 print(f"Target samples:   {train_ds.out_samples}  (at {train_ds.out_sampling_rate} Hz)")
-print(f"Train trials:     {len(train_ds.get_sampling_intervals()[train_ds.recording_id])}")
+print(
+    f"Train trials:     {len(train_ds.get_sampling_intervals()[train_ds.recording_id])}"
+)
 print(f"Val trials:       {len(val_ds.get_sampling_intervals()[val_ds.recording_id])}")
 
 # %% [markdown]
@@ -553,7 +641,9 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 
 fig, axes = plt.subplots(2, 1, figsize=(5, 5))
 
-axes[0].imshow(X.T.numpy(), aspect="auto", cmap="Greys", origin="lower", interpolation="nearest")
+axes[0].imshow(
+    X.T.numpy(), aspect="auto", cmap="Greys", origin="lower", interpolation="nearest"
+)
 axes[0].set_title("Binned spikes (input)")
 axes[0].set_xlabel("Time bin")
 axes[0].set_ylabel("Unit")
@@ -595,7 +685,9 @@ class Linear(nn.Module):
 
         input_size = in_units * in_bins
         output_size = out_dim * out_samples
-        self.net = nn.Sequential(nn.Dropout(dropout), nn.Linear(input_size, output_size))
+        self.net = nn.Sequential(
+            nn.Dropout(dropout), nn.Linear(input_size, output_size)
+        )
 
     def forward(self, x: Tensor) -> Tensor:
         batch_size = x.size(0)
@@ -851,9 +943,7 @@ from torch_brain.samplers import RandomFixedWindowSampler
 from torch_brain.transforms import Compose, RandomCrop, UnitDropout
 
 # a clean recording handle + one real sampling window to demo on
-demo_ds = IBLBrainWideMap2025(
-    root=DATA_ROOT, recording_ids=RECORDING_ID, split=None
-)
+demo_ds = IBLBrainWideMap2025(root=DATA_ROOT, recording_id=RECORDING_ID, split=None)
 demo_rec = demo_ds.get_recording(RECORDING_ID)
 demo_iv = (
     demo_rec.task_aligned_intervals.domain
@@ -873,7 +963,7 @@ print(f"Demo window starts at {DEMO_T0:.2f} s")
 # even one full modality) in RAM. That is what makes training over a 65-min
 # session, or scaling to many sessions, feasible at all.
 #
-# The catch (see the caching in `SimpleIBLWheelSpeedDataset`): lazy is cheap *per
+# The catch (see the caching in `IBLBrainWideMap2025`): lazy is cheap *per
 # call* but you redo it *every epoch*. So the sweet spot is **lazy + selective
 # materialization**: never eagerly load the whole file, but cache the handful of
 # windows you actually sample, once. Lazy decides what you *never* load; the cache
@@ -887,7 +977,7 @@ fpath = os.path.join(DATA_ROOT, "ibl_brain_wide_map_2025", f"{RECORDING_ID}.h5")
 print(f"session file on disk:       {os.path.getsize(fpath) / 1e9:5.2f} GB")
 
 t = time.time()
-_d = IBLBrainWideMap2025(root=DATA_ROOT, recording_ids=RECORDING_ID, split=None)
+_d = IBLBrainWideMap2025(root=DATA_ROOT, recording_id=RECORDING_ID, split=None)
 _r = _d.get_recording(RECORDING_ID)
 t_open = time.time() - t
 
@@ -902,9 +992,13 @@ _allt = np.asarray(_r.spikes.timestamps)
 t_all = time.time() - t
 
 print(f"open dataset (lazy):        {t_open * 1000:5.1f} ms   (reads no signals)")
-print(f"one 1.0 s window slice+bin: {t_slice * 1000:5.1f} ms   (reads only that window)")
+print(
+    f"one 1.0 s window slice+bin: {t_slice * 1000:5.1f} ms   (reads only that window)"
+)
 _all_mb = _allt.nbytes / 1e6
-print(f"load ALL spike timestamps:  {t_all * 1000:5.0f} ms   ({_all_mb:.0f} MB, one modality)")
+print(
+    f"load ALL spike timestamps:  {t_all * 1000:5.0f} ms   ({_all_mb:.0f} MB, one modality)"
+)
 
 # %% [markdown]
 # ## 2. Change the bin size
@@ -918,7 +1012,13 @@ fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
 for ax, bs in zip(axes, [0.02, 0.05, 0.1]):
     s = demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)
     Xd = bin_spikes(s.spikes, num_units=len(s.units), bin_size=bs)
-    ax.imshow(np.log1p(Xd.T), aspect="auto", cmap="Greys", origin="lower", interpolation="nearest")
+    ax.imshow(
+        np.log1p(Xd.T),
+        aspect="auto",
+        cmap="Greys",
+        origin="lower",
+        interpolation="nearest",
+    )
     ax.set_title(f"bin_size = {bs} s  ({Xd.shape[0]} bins)")
     ax.set_xlabel("time bin")
 axes[0].set_ylabel("unit")
@@ -986,7 +1086,9 @@ plt.show()
 # (a) UnitDropout: a different random subset of units each call
 for _ in range(5):
     before = len(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0).units)
-    after = len(UnitDropout(field="spikes")(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)).units)
+    after = len(
+        UnitDropout(field="spikes")(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)).units
+    )
     print(f"UnitDropout: {before} -> {after} units kept")
 
 # (b) UnitFilter: keep only units in one brain region (cosmos atlas)
@@ -999,7 +1101,9 @@ ax.set_title("Units per brain region: UnitFilter selects any subset in one line"
 plt.tight_layout()
 plt.show()
 
-th_filter = UnitFilter(mask_fn=lambda u: np.asarray(u.region_cosmos) == b"TH", field="spikes")
+th_filter = UnitFilter(
+    mask_fn=lambda u: np.asarray(u.region_cosmos) == b"TH", field="spikes"
+)
 n_before = len(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0).units)
 n_after = len(th_filter(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)).units)
 print(f"UnitFilter to thalamus: {n_before} -> {n_after} units")
