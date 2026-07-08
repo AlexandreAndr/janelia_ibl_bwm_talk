@@ -78,7 +78,7 @@ if IN_COLAB:
             "pip",
             "install",
             "-q",
-            "torch-brain==0.2.0a0",
+            "torch-brain==.2.0",
             "torch==2.10.0",
             "scikit-learn==1.7.2",
             "matplotlib",
