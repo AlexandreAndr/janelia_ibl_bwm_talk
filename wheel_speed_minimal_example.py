@@ -169,6 +169,17 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.backends.cudnn.benchmark = True
 print(f"Using device: {device}")
 
+# DataLoader performance knobs. NUM_WORKERS>0 moves each __getitem__ call
+# (HDF5 read + spike binning) into separate worker processes, so it overlaps
+# with the GPU doing the previous batch's forward/backward instead of
+# blocking the main process. Colab's free tier usually gives 2 CPU cores, so
+# we cap at that; bump this up if you have more. PIN_MEMORY (+ non_blocking=True
+# on .to(device) below) lets the host->device copy run asynchronously, which
+# only matters when training on a GPU.
+NUM_WORKERS = min(4, os.cpu_count() or 1)
+PIN_MEMORY = device.type == "cuda"
+print(f"Using {NUM_WORKERS} dataloader workers, pin_memory={PIN_MEMORY}")
+
 # %% [markdown]
 # ## A First Look at the Data
 #
@@ -888,10 +899,17 @@ train_sampler = TrialSampler(
 )
 # Note the sampler is passed explicitly; it is not the default random/sequential
 # sampler PyTorch picks for an indexable dataset.
+# num_workers>0 loads batches in separate worker processes (overlapping with
+# GPU compute instead of blocking on it); persistent_workers keeps them alive
+# across epochs instead of respawning; pin_memory lets .to(device) below copy
+# asynchronously.
 train_loader = DataLoader(
     train_ds,
     batch_size=BATCH_SIZE,
     sampler=train_sampler,
+    num_workers=NUM_WORKERS,
+    persistent_workers=NUM_WORKERS > 0,
+    pin_memory=PIN_MEMORY,
 )
 print(f"Number of units: {train_ds.num_units}")
 print(f"Number of training samples: {len(train_sampler)}")
@@ -905,6 +923,9 @@ val_loader = DataLoader(
     val_ds,
     batch_size=BATCH_SIZE,
     sampler=val_sampler,
+    num_workers=NUM_WORKERS,
+    persistent_workers=NUM_WORKERS > 0,
+    pin_memory=PIN_MEMORY,
 )
 print(f"Number of validation samples: {len(val_sampler)}")
 
@@ -919,6 +940,8 @@ test_loader = DataLoader(
     test_ds,
     batch_size=BATCH_SIZE,
     sampler=test_sampler,
+    num_workers=NUM_WORKERS,
+    pin_memory=PIN_MEMORY,
 )
 print(f"Number of test samples: {len(test_sampler)}")
 
@@ -1128,7 +1151,9 @@ val_r2_history = []
 for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
     model.train()
     for X, Y in train_loader:
-        X, Y = X.to(device), Y.to(device)
+        # non_blocking=True only actually overlaps with pin_memory=True (set
+        # on the DataLoader above) and a CUDA device; it is a no-op otherwise.
+        X, Y = X.to(device, non_blocking=True), Y.to(device, non_blocking=True)
         pred = model(X)
         loss = nn.functional.mse_loss(pred, Y)
         optim.zero_grad()
@@ -1139,7 +1164,7 @@ for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
         model.eval()
         preds, targets = [], []
         for X, Y in val_loader:
-            X, Y = X.to(device), Y.to(device)
+            X, Y = X.to(device, non_blocking=True), Y.to(device, non_blocking=True)
             preds.append(model(X))
             targets.append(Y)
         pred = torch.cat(preds).flatten(0, 1).cpu()
@@ -1200,7 +1225,7 @@ model.eval()
 with torch.no_grad():
     preds, targets = [], []
     for X, Y in test_loader:
-        X, Y = X.to(device), Y.to(device)
+        X, Y = X.to(device, non_blocking=True), Y.to(device, non_blocking=True)
         preds.append(model(X))
         targets.append(Y)
     test_pred = torch.cat(preds).flatten(0, 1).cpu()
