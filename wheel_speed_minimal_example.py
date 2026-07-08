@@ -767,6 +767,33 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 
 
 # %% [markdown]
+# ## Dataset and DataLoader in PyTorch
+#
+# A `Dataset` answers two questions about your data:
+#
+# 1. **How many samples are there?** Answered by `__len__`.
+# 2. **How do you fetch one sample, given its index?** Answered by
+#    `__getitem__(i)`.
+#
+# That's it: it doesn't know anything about batching or shuffling.
+#
+# A `DataLoader` wraps a `Dataset` and handles everything about how you
+# consume it: batching, shuffling, sampling strategy (via a `Sampler`, e.g.
+# random, weighted, sequential), parallel loading (multiple worker
+# processes), and collating samples into a batch tensor (via `collate_fn`).
+#
+# ```python
+# class MyDataset(Dataset):
+#     def __len__(self):
+#         return len(self.samples)
+#
+#     def __getitem__(self, i):
+#         return self.samples[i]
+#
+# loader = DataLoader(MyDataset(), batch_size=32, shuffle=True, num_workers=4)
+# ```
+#
+# %% [markdown]
 # ## Defining a Simple & Custom Dataset
 #
 # `IBLBrainWideMap2025` (defined above) is a `brainsets`-backed dataset for a
