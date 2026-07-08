@@ -552,23 +552,17 @@ print(
     f"({wheel_speed.nbytes / 1e6:.2f} MB, the whole 65 min at 50 Hz)"
 )
 
-# (ii) Load a SINGLE 1.0 s window: exactly one training sample's worth of data.
+# (ii) Load a SINGLE 1.0 s window of a SINGLE attribute: one training sample's
+#      worth of wheel speed, and nothing else.
 mv = lazy_rec.task_aligned_intervals.movement_intervals
 t0 = float(np.asarray(mv.start)[10])
 t = time.time()
 window = lazy_rec.slice(t0, t0 + 1.0)  # crop every modality to [t0, t0 + 1 s]
-X = bin_spikes(window.spikes, num_units=len(window.units), bin_size=BIN_SIZE)
-t_wheel = time.time()
 y = np.asarray(window.wheel.speed)
-dt_wheel = (time.time() - t_wheel) * 1e3
-dt = (time.time() - t) * 1e3
+dt_wheel = (time.time() - t) * 1e3
 print(
-    f"(ii) slice one 1.0 s window (spikes + wheel): {dt:6.2f} ms   "
-    f"(X = {tuple(X.shape)} binned spikes, y = {y.shape} wheel speed)"
-)
-print(
-    f"     -> wheel.speed slice only:  {dt_wheel:6.2f} ms   "
-    f"({dt_full / dt_wheel:5.0f}x less time than loading the whole session)"
+    f"(ii) slice one 1.0 s window, wheel.speed only: {dt_wheel:6.2f} ms   "
+    f"(y = {y.shape} wheel speed, {dt_full / dt_wheel:5.0f}x less time than loading the whole session)"
 )
 
 # %% [markdown]
