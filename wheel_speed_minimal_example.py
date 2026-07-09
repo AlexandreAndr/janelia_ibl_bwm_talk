@@ -559,11 +559,16 @@ def _thin(obj, field, target=100_000, window_s=ov_end):
 
 # One shared time range links every panel: Bokeh's equivalent of sharex=True.
 # Times are passed in milliseconds because the helpers use a datetime x axis.
-# Start zoomed in on the first slice of the 10 min overview window; bounds
-# keeps pan/zoom from leaving that window, and the reset tool snaps back to
-# this default view.
-DEFAULT_ZOOM_S = 300  # 5 minutes
-shared_x = Range1d(0.0, min(DEFAULT_ZOOM_S, ov_end) * 1e3, bounds=(0.0, ov_end * 1e3))
+# Start zoomed in on the minute 5-6 slice of the 10 min overview window;
+# bounds keeps pan/zoom from leaving that window, and the reset tool snaps
+# back to this default view.
+DEFAULT_ZOOM_START_S = 300  # 5 min
+DEFAULT_ZOOM_END_S = 360  # 6 min
+shared_x = Range1d(
+    min(DEFAULT_ZOOM_START_S, ov_end) * 1e3,
+    min(DEFAULT_ZOOM_END_S, ov_end) * 1e3,
+    bounds=(0.0, ov_end * 1e3),
+)
 W = 700
 
 p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=220)
