@@ -587,7 +587,7 @@ p_paw = plot_time_series(
     x_range=shared_x,
     y_axis_label="L paw speed",
     width=W,
-    height=80,
+    height=115,
 )
 
 # Only the bottom panel needs to show the (shared) time axis.
