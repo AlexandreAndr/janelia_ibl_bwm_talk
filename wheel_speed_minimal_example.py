@@ -595,6 +595,13 @@ for p in (p_raster, p_movement, p_wheel, p_whisk):
     p.xaxis.visible = False
 p_paw.xaxis.axis_label = "time in session"
 
+# Drop the y tick marks and numbers on the signal panels; the axis label
+# (e.g. "wheel speed") already says what each panel is.
+for p in (p_wheel, p_whisk, p_paw):
+    p.yaxis.major_tick_line_color = None
+    p.yaxis.minor_tick_line_color = None
+    p.yaxis.major_label_text_font_size = "0pt"
+
 # One merged toolbar for the whole column instead of one per panel: five
 # repeated toolbars ate up extra width and pushed the figure past the page's
 # content column.
