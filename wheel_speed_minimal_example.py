@@ -219,7 +219,7 @@ _repr = repr(recording)
 _n_lines = _repr.count("\n") + 1
 display(
     HTML(
-        "<details><summary style='cursor:pointer'>"
+        "<details open><summary style='cursor:pointer'>"
         f"Show the full recording object (Data(...), {_n_lines} lines)"
         "</summary>"
         "<pre style='max-height:22em;overflow:auto;font-size:0.8em;line-height:1.3'>"
