@@ -63,6 +63,19 @@
 # from the Hugging Face Hub (public, no login required), so you can get
 # started in seconds. See this folder's `README.md` for more details.
 #
+# **Good units only.** The raw session recorded 1547 units, but many are noise
+# clusters, low-firing, or sit on a probe that failed QC. Rather than filtering
+# them out here at read-time, this tutorial's `brainsets` pipeline
+# ([`ibl_brain_wide_map_2025/pipeline.py`](ibl_brain_wide_map_2025/pipeline.py))
+# does it once, upstream, via three `--unit-filter` flags passed to
+# `brainsets prepare`: `probe_qc` (`qc_neural == PASS`), `firing_rate`
+# (`firing_rate > 1 Hz`), and `unit_qc` (KiloSort/IBL's own `label == 1.0`,
+# "good"). Because the pipeline is just plain Python, adding this custom
+# quality logic is a few lines in `extract_spikes()`, no different from any
+# other preprocessing step. The processed `.h5` this notebook loads was built
+# with all three flags, so it already ships with only the **358 good-quality
+# units**; the discarded units' spikes were never written to disk at all.
+#
 
 # %% [markdown]
 # **If running in Colab:** install this notebook's pinned dependencies
@@ -273,7 +286,7 @@ display(
 # Small, reusable Bokeh helpers in the same style as the torch-brain tutorials:
 # one for an event raster, one for a labelled-interval strip, one for a line.
 # Each accepts an x_range so several panels can be locked to one shared time axis.
-from bokeh.io import output_notebook, show
+from bokeh.embed import file_html
 from bokeh.layouts import column
 from bokeh.models import (
     BoxZoomTool,
@@ -288,11 +301,21 @@ from bokeh.models import (
 from bokeh.plotting import figure
 from bokeh.resources import INLINE
 
-# resources=INLINE bakes BokehJS into the notebook output (and thus the rendered
-# HTML), so the GitHub Pages page needs no CDN at view time. This makes each page
-# larger (~4 MB) but fully self-contained. hide_banner drops the "BokehJS ...
-# loaded" message. Drop `resources=INLINE` to load from cdn.bokeh.org instead.
-output_notebook(resources=INLINE, hide_banner=True)
+
+def show(layout, title="torch-brain tutorial figure"):
+    """Render a Bokeh layout as one self-contained HTML blob (BokehJS + figure).
+
+    `bokeh.io.show` instead relies on Jupyter "notebook comms": it loads
+    BokehJS once, in whichever cell runs first, and every later `show()` call
+    just assumes that copy is still on the page. That assumption breaks in
+    frontends that sandbox each cell's output separately (e.g. VS Code's
+    Jupyter extension), where the div silently stays empty. `file_html`
+    bundles BokehJS with the figure into one blob (~4 MB, via
+    `resources=INLINE`), so each cell renders on its own regardless of
+    frontend, and the same HTML also drops into the rendered GitHub Pages
+    site with no CDN needed at view time.
+    """
+    display(HTML(file_html(layout, INLINE, title)))
 
 
 def _x_only_tools():
@@ -717,78 +740,44 @@ for bs in (0.02, 0.05, 0.10):
 # *Why this framework is powerful*, works through them.
 
 # %% [markdown]
-# # Dataset and DataLoader in PyTorch
+# # Dataset, Sampler, and DataLoader
 #
-# A `Dataset` answers two questions about your data:
+# TorchBrain's data pipeline for training is built from three cooperating
+# pieces:
 #
-# 1. **How many samples are there?** Answered by `__len__`.
-# 2. **How do you fetch one sample, given its index?** Answered by
-#    `__getitem__(i)`.
-#
-# That's it: it doesn't know anything about batching or shuffling.
-#
-# A `DataLoader` wraps a `Dataset` and handles everything about how you
-# consume it: batching, shuffling, sampling strategy (via a `Sampler`, e.g.
-# random, weighted, sequential), parallel loading (multiple worker
-# processes), and collating samples into a batch tensor (via `collate_fn`).
-#
-# ```python
-# class MyDataset(Dataset):
-#     def __len__(self):
-#         return len(self.samples)
-#
-#     def __getitem__(self, i):
-#         return self.samples[i]
-#
-# loader = DataLoader(MyDataset(), batch_size=32, shuffle=True, num_workers=4)
-# ```
-#
+# - **Dataset** tells the sampler *where* sampling is allowed (via
+#   `get_sampling_intervals`), and turns a chosen window into an `(X, y)`
+#   sample (via `__getitem__`).
+# - **Sampler** decides *what* samples to load, and in what order, by
+#   emitting `DatasetIndex` objects.
+# - **DataLoader** fetches the chosen samples and collates them into a batch,
+#   as usual in PyTorch.
+
 # %% [markdown]
-# # Defining a Simple & Custom Dataset
+# ## Defining a custom Dataset
 #
-# `IBLBrainWideMap2025` (defined above) is a `brainsets`-backed dataset for a
-# single recording. Two methods matter for the wheel-speed task:
-# - **`get_sampling_intervals`**: Decides *which* time windows count as samples.
-#   For wheel-speed decoding, each sample is a fixed **1.0 s** window drawn from
-#   the trials of the IBL decision-making task, restricted to the movement window
-#   and to the times where the wheel signal is defined. We use the dataset's
-#   built-in **causal** train/val/test split (`{split}_domain`): a temporal
-#   40/20/40 split, so train is early in the session and test is late.
-# - **`__getitem__`**: Given a time-sliced sample, turns it into model Tensors.
+# In TorchBrain we define a custom `Dataset`; `IBLBrainWideMap2025` below is a
+# simple example, for a single recording. Two methods matter for the
+# wheel-speed task:
 #
-# Note: `wheel_speed` is intentionally **not normalized** (unlike the
-# pixel-valued whisker/paw signals), so we use the raw signal as the target.
-# (If you swap in another covariate as the target, normalization may matter.)
-#
-# **Good units only.** The raw session recorded 1547 units, but many are noise
-# clusters, low-firing, or sit on a probe that failed QC. Rather than filtering
-# them out here at read-time, this tutorial's `brainsets` pipeline
-# ([`ibl_brain_wide_map_2025/pipeline.py`](ibl_brain_wide_map_2025/pipeline.py))
-# does it once, upstream, via three `--unit-filter` flags passed to
-# `brainsets prepare`: `probe_qc` (`qc_neural == PASS`), `firing_rate`
-# (`firing_rate > 1 Hz`), and `unit_qc` (KiloSort/IBL's own `label == 1.0`,
-# "good"). Because the pipeline is just plain Python, adding this custom
-# quality logic is a few lines in `extract_spikes()`, no different from any
-# other preprocessing step. The processed `.h5` this notebook loads was built
-# with all three flags, so it already ships with only the **358 good-quality
-# units**; the discarded units' spikes were never written to disk at all.
-#
-# Filtering upstream instead of on every read also makes this example faster
-# to run: a smaller file to download (~0.4 GB vs. ~1.9 GB unfiltered), fewer
-# units for every downstream step (binning, the model's input layer, one
-# fewer filtering pass per `__getitem__`), so both loading the session and
-# training all three decoders below take noticeably less time.
+# - **`get_sampling_intervals`**: decides *which* time windows count as
+#   samples. For wheel-speed decoding, each sample is a fixed **1.0 s** window
+#   drawn from the trials of the IBL decision-making task, restricted to the
+#   movement window and to the times where the wheel signal is defined. We use
+#   the dataset's built-in **causal** train/val/test split (`{split}_domain`):
+#   train is early in the session, val is in the middle, and test is late
+#   (more on the actual split proportions below).
+# - **`__getitem__`**: given a time window, turns it into an `(X, y)` sample:
+#   `X` is the model input, a binned spike raster; `y` is the model target,
+#   the wheel speed.
 #
 # %%
 #| code-fold: false
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Literal
 
 from torch_brain.datasets import Dataset, DatasetIndex, SpikingDatasetMixin
-from torch_brain.transforms import UnitFilter
 from torch_brain.utils import bin_spikes
-
-Split: TypeAlias = Literal["train", "val", "test"]
 
 
 class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
@@ -816,9 +805,9 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
         self,
         root: str,
         recording_id: str,
-        bin_size: float | None = None,
+        bin_size: float,
         dirname: str = "ibl_brain_wide_map_2025",
-        split: Split | None = "train",
+        split: Literal["train", "val", "test"] | None = "train",
     ):
         super().__init__(
             dataset_dir=Path(root) / dirname,
@@ -830,48 +819,31 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
         self.recording_id = recording_id
         self.bin_size = bin_size
         self.out_sampling_rate = float(self.BEHAVIOR_SFREQ)  # 50 Hz
-        # Each sample spans CONTEXT_WINDOW seconds (1.0 s).
         self.out_samples = round(self.CONTEXT_WINDOW * self.out_sampling_rate)  # 50
-        self.num_bins = (
-            round(self.CONTEXT_WINDOW / self.bin_size) if self.bin_size else None
-        )  # 20 at 0.05 s
-        # The pipeline already restricts this recording to good-quality units
-        # (see "Good units only" below), so num_units is just the unit count.
+        self.num_bins = round(self.CONTEXT_WINDOW / self.bin_size)
         self.num_units = len(self.get_unit_ids())
 
-    # Contract between Datasets and Samplers:
     # get_sampling_intervals() returns {recording_id: Interval} listing
     # the windows the sampler may draw from.
-    # Sampler will emit one DatasetIndex per sample.
     def get_sampling_intervals(self, *_args, **_kwargs):
         rid = self.recording_id
         recording = self.get_recording(rid)
 
-        # Trials aligned to the IBL decision-making task (each is a 1.0 s window).
-        intervals = recording.task_aligned_intervals.domain
-        # The dataset provides a causal 40/20/40 temporal train/val/test split;
-        # intersect with the requested split's domain.
+        intervals = recording.task_aligned_intervals.movement_intervals
         intervals = intervals & getattr(recording, f"{self.split}_domain")
-        # Wheel decoding is scored within the movement window of each trial.
-        intervals = intervals & recording.task_aligned_intervals.movement_intervals
-        # And only where the wheel signal itself is defined.
         intervals = intervals & recording.wheel._domain
         return {rid: intervals}
 
     # `index` is a DatasetIndex(recording_id, start, end) produced by the sampler.
     def __getitem__(self, index: DatasetIndex):
-        # Slice the recording to this sample's time window; all modalities
-        # (.spikes, .units, .wheel.speed, ...) are cropped (lazily).
         recording = self.get_recording(index.recording_id)
         data = recording.slice(index.start, index.end)
 
         # All models take (num_bins, num_units) and return (out_samples, out_dim).
 
-        # Spikes are an irregular event stream -> bin them into a regular grid.
         X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
         X = torch.from_numpy(X).float()  # shape: (num_bins, num_units)
 
-        # Wheel speed is already regularly sampled at 50 Hz. It is NOT normalized.
         Y = np.asarray(data.wheel.speed, dtype=np.float32)  # shape: (out_samples,)
         Y = torch.from_numpy(Y).unsqueeze(-1)  # shape: (out_samples, out_dim=1)
 
@@ -879,12 +851,12 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 
 
 # %% [markdown]
-# # Creating the Datasets, Samplers, and DataLoaders
+# ## Building the train, validation, and test pipeline
 #
-# 💡 This is where we come across the main pattern for creating data pipelines with TorchBrain:
-# - **Dataset** tells the sampler *where sampling is allowed*,
-# - **Sampler** decides *what* samples to load (by emitting `DatasetIndex` objects), and
-# - **DataLoader** batches the samples as usual.
+# `IBLBrainWideMap2025` is instantiated once per split, each wrapped in its
+# own `TrialSampler` and `DataLoader`. Once these are built, we will look at
+# what the split boundaries and a single sample actually look like, and step
+# through a real training epoch's sample order interactively.
 
 # %%
 from torch.utils.data import DataLoader  # standard PyTorch loader
@@ -955,8 +927,7 @@ print(
 print(f"Val trials:       {len(val_ds.get_sampling_intervals()[val_ds.recording_id])}")
 
 # %% [markdown]
-# Let's first peek at a single sample to confirm the shapes match what we expect,
-# and visualize the binned spikes (input) and wheel speed (target) for one trial.
+# Let's first peek at a single sample to confirm the shapes match what we expect.
 
 # %%
 first_sample_index = next(iter(train_sampler))
@@ -971,24 +942,188 @@ X, Y = train_ds[first_sample_index]
 print(f"X shape: {tuple(X.shape)}  (num_bins, num_units)")
 print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 
-fig, axes = plt.subplots(2, 1, figsize=(5, 5))
+# %% [markdown]
+# ## Visualizing the split, a sample, and how sampling works
+#
+# `{split}_domain` is one contiguous block per split (train early, val in the
+# middle, test late), covering the whole session. But `TrialSampler` never
+# samples from that block directly: `get_sampling_intervals` first intersects
+# it with `movement_intervals` (only movement periods count as samples) and
+# with `wheel._domain` (only where the target signal is defined). The first
+# two rows below make that concrete: the domain blocks, and directly beneath
+# them, the much sparser set of movement windows each split actually draws
+# samples from.
+#
+# One thing this reveals: the split is balanced by **trial count**, close to
+# the pipeline's target 40/20/40 (148/72/145 movement windows), but because
+# trials are not paced evenly through the session, the same split covers only
+# about **21%/11%/67% of the session's raw time**. Pan or zoom either row
+# (they are linked) to see this for yourself.
+#
+# `train_sampler` was built with `shuffle=True`, so every epoch
+# `TrialSampler.__iter__` draws a fresh `torch.randperm` and yields those
+# windows in a new random order; `val_sampler`/`test_sampler` stay in the
+# fixed order `sampling_intervals` was built in, for reproducible evaluation.
+# The slider below freezes one such training-epoch order: step through it to
+# see the corresponding window highlighted on the row above, and the
+# `(X, Y)` pair, binned spikes and wheel speed, it turns into.
 
-axes[0].imshow(
-    X.T.numpy(), aspect="auto", cmap="Greys", origin="lower", interpolation="nearest"
+# %%
+#| code-fold: true
+#| code-summary: "Bokeh: split domains, sampling intervals, and an interactive sample stepper"
+from bokeh.layouts import row as bokeh_row
+from bokeh.models import BoxAnnotation, Button, CustomJS, Div, Slider
+
+recording = train_ds.get_recording(RECORDING_ID)
+split_t_end = float(recording.domain.end[-1])
+split_x_range = Range1d(0.0, split_t_end * 1e3, bounds=(0.0, split_t_end * 1e3))
+
+domains_fig = plot_intervals(
+    recording.train_domain,
+    recording.val_domain,
+    recording.test_domain,
+    x_range=split_x_range,
+    title="train / val / test domain: one contiguous block each",
+    width=900,
+    height=90,
 )
-axes[0].set_title("Binned spikes (input)")
-axes[0].set_xlabel("Time bin")
-axes[0].set_ylabel("Unit")
+domains_fig.xaxis.visible = False
 
-t = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples)
-axes[1].plot(t, Y[:, 0].numpy(), label="wheel speed")
-axes[1].set_title("Wheel speed (target)")
-axes[1].set_xlabel("Time within trial (s)")
-axes[1].set_ylabel("Wheel speed")
-axes[1].legend()
+train_intervals = train_ds.get_sampling_intervals()[RECORDING_ID]
+val_intervals = val_ds.get_sampling_intervals()[RECORDING_ID]
+test_intervals = test_ds.get_sampling_intervals()[RECORDING_ID]
 
-plt.tight_layout()
-plt.show()
+samples_fig = plot_intervals(
+    train_intervals,
+    val_intervals,
+    test_intervals,
+    x_range=split_x_range,
+    title="sampling intervals actually drawn: movement windows within each split",
+    width=900,
+    height=90,
+)
+samples_fig.xaxis.axis_label = "time in session"
+
+legend = Div(
+    text=(
+        "<span style='color:red'>&#9632;</span> train &nbsp;&nbsp;"
+        "<span style='color:blue'>&#9632;</span> val &nbsp;&nbsp;"
+        "<span style='color:green'>&#9632;</span> test"
+    )
+)
+
+# The moving highlight: one training window at a time, drawn on the row above.
+highlight = BoxAnnotation(
+    left=0, right=0, bottom=-0.45, top=0.45, fill_color="red", fill_alpha=0.35
+)
+samples_fig.add_layout(highlight)
+
+# Freeze one shuffled training-epoch order and precompute its (X, Y) pairs so
+# the slider below only ever swaps already-computed arrays, no HDF5 reads.
+N_DEMO = 12
+demo_indices = list(train_sampler)[:N_DEMO]
+demo_X = []
+demo_Y = []
+for idx in demo_indices:
+    Xd, Yd = train_ds[idx]
+    demo_X.append(Xd.T.numpy().tolist())  # (num_units, num_bins), for the image glyph
+    demo_Y.append(Yd[:, 0].numpy().tolist())  # (out_samples,)
+demo_starts = [float(idx.start) for idx in demo_indices]
+demo_ends = [float(idx.end) for idx in demo_indices]
+t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist()
+
+raster_source = ColumnDataSource(data=dict(image=[demo_X[0]]))
+p_demo_raster = figure(
+    width=380,
+    height=280,
+    title="Binned spikes (X)",
+    x_axis_label="Time bin",
+    y_axis_label="Unit",
+    toolbar_location=None,
+)
+p_demo_raster.image(
+    image="image",
+    x=0,
+    y=0,
+    dw=train_ds.num_bins,
+    dh=train_ds.num_units,
+    source=raster_source,
+    palette="Greys256",
+)
+
+wheel_source = ColumnDataSource(data=dict(x=t_local, y=demo_Y[0]))
+p_demo_wheel = figure(
+    width=380,
+    height=280,
+    title="Wheel speed (Y)",
+    x_axis_label="Time within window (s)",
+    y_axis_label="Wheel speed",
+    toolbar_location=None,
+)
+p_demo_wheel.line("x", "y", source=wheel_source, line_width=2, color="green")
+
+info_div = Div(
+    text=f"Sample 1 / {N_DEMO} (start={demo_starts[0]:.2f}s, end={demo_ends[0]:.2f}s)"
+)
+slider = Slider(
+    start=0,
+    end=N_DEMO - 1,
+    value=0,
+    step=1,
+    title="Sample index, in the order this epoch drew them",
+)
+prev_btn = Button(label="< Prev", width=70)
+next_btn = Button(label="Next >", width=70)
+
+step_callback = CustomJS(
+    args=dict(
+        slider=slider,
+        raster_source=raster_source,
+        wheel_source=wheel_source,
+        info_div=info_div,
+        highlight=highlight,
+        X_list=demo_X,
+        Y_list=demo_Y,
+        starts=demo_starts,
+        ends=demo_ends,
+        t_local=t_local,
+        n_demo=N_DEMO,
+    ),
+    code="""
+    const i = slider.value
+    raster_source.data = {image: [X_list[i]]}
+    wheel_source.data = {x: t_local, y: Y_list[i]}
+    highlight.left = starts[i] * 1e3
+    highlight.right = ends[i] * 1e3
+    info_div.text = `Sample ${i + 1} / ${n_demo} (start=${starts[i].toFixed(2)}s, end=${ends[i].toFixed(2)}s)`
+    """,
+)
+slider.js_on_change("value", step_callback)
+prev_btn.js_on_click(
+    CustomJS(
+        args=dict(slider=slider), code="slider.value = Math.max(0, slider.value - 1)"
+    )
+)
+next_btn.js_on_click(
+    CustomJS(
+        args=dict(slider=slider, n_demo=N_DEMO),
+        code="slider.value = Math.min(n_demo - 1, slider.value + 1)",
+    )
+)
+# Set the initial highlight position (the callback above only fires on change).
+highlight.left = demo_starts[0] * 1e3
+highlight.right = demo_ends[0] * 1e3
+
+show(
+    column(
+        legend,
+        domains_fig,
+        samples_fig,
+        bokeh_row(prev_btn, slider, next_btn),
+        info_div,
+        bokeh_row(p_demo_raster, p_demo_wheel),
+    )
+)
 
 # %% [markdown]
 # # The Model
@@ -1137,7 +1272,14 @@ print(f"\nTrainable parameters: {num_params:,}")
 print(model)
 
 # %% [markdown]
-# # Training
+# # Training and Evaluation
+#
+# With the data pipeline and model defined, we train, then evaluate on held-out
+# data: first the validation set (monitored during training), then the test
+# set, touched only once, after training and model selection are done.
+
+# %% [markdown]
+# ## Training
 #
 # A standard PyTorch loop! MSE loss against the wheel speed, AdamW optimizer,
 # R² score on the validation set at the end of each epoch.
@@ -1175,10 +1317,10 @@ for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
         epoch_pbar.set_description(f"Val R²: {r2:.3f}")
 
 # %% [markdown]
-# # Evaluation
+# ## Evaluation
 #
 # Plot the R² curve over training and compare predicted vs. actual wheel speed
-# on one validation trial.
+# on several validation trials.
 
 # %%
 fig, ax = plt.subplots(figsize=(6, 3))
@@ -1191,28 +1333,35 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Let's look at an example of how our model's predictions compare with the ground truth!
+# Let's look at examples of how our model's predictions compare with the ground
+# truth, across 8 validation trials.
 
 # %%
-model.eval()
-with torch.no_grad():
-    X, Y = val_ds[next(iter(val_sampler))]
-    pred = model(X.unsqueeze(0).to(device)).squeeze(0).cpu()
-
+N_EXAMPLES = 8
+val_indices = list(val_sampler)[:N_EXAMPLES]
 t = np.linspace(0.0, val_ds.CONTEXT_WINDOW, val_ds.out_samples)
-fig, ax = plt.subplots(figsize=(6, 4))
-ax.plot(t, Y[:, 0].numpy(), label="actual", color="k")
-ax.plot(t, pred[:, 0].numpy(), label="predicted", color="green")
-ax.set_xlabel("Time within trial (s)")
-ax.set_ylabel("Wheel speed")
-ax.set_title("Predicted vs. actual wheel speed")
-ax.legend(loc="upper left")
 
+model.eval()
+fig, axes = plt.subplots(2, 4, figsize=(16, 6), sharex=True, sharey=True)
+with torch.no_grad():
+    for ax, index in zip(axes.flat, val_indices):
+        X, Y = val_ds[index]
+        pred = model(X.unsqueeze(0).to(device)).squeeze(0).cpu()
+        ax.plot(t, Y[:, 0].numpy(), label="actual", color="k")
+        ax.plot(t, pred[:, 0].numpy(), label="predicted", color="green")
+        ax.set_title(f"start={index.start:.2f}s", fontsize=9)
+
+for ax in axes[-1, :]:
+    ax.set_xlabel("Time within trial (s)")
+for ax in axes[:, 0]:
+    ax.set_ylabel("Wheel speed")
+axes[0, 0].legend(loc="upper left")
+fig.suptitle("Predicted vs. actual wheel speed (8 validation trials)")
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# # Final Test Evaluation
+# ## Final Test Evaluation
 #
 # The **test** split is the *late* portion of the session (the causal split), held
 # out from training and model selection. We score it exactly **once**, here, to get
@@ -1238,23 +1387,29 @@ print(f"Best validation R²: {best_val_r2:.3f}")
 print(f"Final test R²:      {test_r2:.3f}")
 
 # %% [markdown]
-# And the predicted vs. actual wheel speed on one held-out test trial:
+# And the predicted vs. actual wheel speed across 8 held-out test trials:
 
 # %%
-model.eval()
-with torch.no_grad():
-    X, Y = test_ds[next(iter(test_sampler))]
-    pred = model(X.unsqueeze(0).to(device)).squeeze(0).cpu()
-
+N_EXAMPLES = 8
+test_indices = list(test_sampler)[:N_EXAMPLES]
 t = np.linspace(0.0, test_ds.CONTEXT_WINDOW, test_ds.out_samples)
-fig, ax = plt.subplots(figsize=(6, 4))
-ax.plot(t, Y[:, 0].numpy(), label="actual", color="k")
-ax.plot(t, pred[:, 0].numpy(), label="predicted", color="green")
-ax.set_xlabel("Time within trial (s)")
-ax.set_ylabel("Wheel speed")
-ax.set_title("Test trial: predicted vs. actual wheel speed")
-ax.legend(loc="upper left")
 
+model.eval()
+fig, axes = plt.subplots(2, 4, figsize=(16, 6), sharex=True, sharey=True)
+with torch.no_grad():
+    for ax, index in zip(axes.flat, test_indices):
+        X, Y = test_ds[index]
+        pred = model(X.unsqueeze(0).to(device)).squeeze(0).cpu()
+        ax.plot(t, Y[:, 0].numpy(), label="actual", color="k")
+        ax.plot(t, pred[:, 0].numpy(), label="predicted", color="green")
+        ax.set_title(f"start={index.start:.2f}s", fontsize=9)
+
+for ax in axes[-1, :]:
+    ax.set_xlabel("Time within trial (s)")
+for ax in axes[:, 0]:
+    ax.set_ylabel("Wheel speed")
+axes[0, 0].legend(loc="upper left")
+fig.suptitle("Test trials: predicted vs. actual wheel speed (8 trials)")
 plt.tight_layout()
 plt.show()
 
@@ -1337,22 +1492,6 @@ ATTR = "motion_energy"  # try: "motion_energy", "left_paw_speed", "right_paw_spe
 # Every cell below is illustrative: it operates on a single demo window and does
 # **not** modify the tuned pipeline above.
 
-# %%
-from torch_brain.samplers import RandomFixedWindowSampler
-from torch_brain.transforms import Compose, RandomCrop, UnitDropout
-
-# a clean recording handle + one real sampling window to demo on
-demo_ds = IBLBrainWideMap2025(root=DATA_ROOT, recording_id=RECORDING_ID, split=None)
-demo_rec = demo_ds.get_recording(RECORDING_ID)
-demo_iv = (
-    demo_rec.task_aligned_intervals.domain
-    & demo_rec.train_domain
-    & demo_rec.task_aligned_intervals.movement_intervals
-    & demo_rec.wheel._domain
-)
-DEMO_T0 = float(demo_iv.start[10])
-print(f"Demo window starts at {DEMO_T0:.2f} s")
-
 # %% [markdown]
 # # 1. Lazy loading and the time gain
 #
@@ -1372,168 +1511,168 @@ print(f"Demo window starts at {DEMO_T0:.2f} s")
 # on `(recording_id, start, end)`) would trade that simplicity back for speed
 # if this were scaled to more sessions, more epochs, or heavier per-sample
 # processing.
-
-# %%
-import os
-import time
-
-fpath = os.path.join(DATA_ROOT, "ibl_brain_wide_map_2025", f"{RECORDING_ID}.h5")
-print(f"session file on disk:       {os.path.getsize(fpath) / 1e9:5.2f} GB")
-
-t = time.time()
-_d = IBLBrainWideMap2025(root=DATA_ROOT, recording_id=RECORDING_ID, split=None)
-_r = _d.get_recording(RECORDING_ID)
-t_open = time.time() - t
-
-t = time.time()
-for _ in range(20):
-    _s = _r.slice(DEMO_T0, DEMO_T0 + 1.0)
-    _ = bin_spikes(_s.spikes, num_units=len(_s.units), bin_size=BIN_SIZE)
-t_slice = (time.time() - t) / 20
-
-t = time.time()
-_allt = np.asarray(_r.spikes.timestamps)
-t_all = time.time() - t
-
-print(f"open dataset (lazy):        {t_open * 1000:5.1f} ms   (reads no signals)")
-print(
-    f"one 1.0 s window slice+bin: {t_slice * 1000:5.1f} ms   (reads only that window)"
-)
-_all_mb = _allt.nbytes / 1e6
-print(
-    f"load ALL spike timestamps:  {t_all * 1000:5.0f} ms   ({_all_mb:.0f} MB, one modality)"
-)
-
-# %% [markdown]
-# # 2. Change the bin size
 #
-# Binning is one parameter. Finer bins give more temporal resolution but a
-# higher-dimensional, sparser input; coarser bins regularize. The model still
-# just receives `(num_bins, num_units)`.
-
-# %%
-fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
-for ax, bs in zip(axes, [0.02, 0.05, 0.1]):
-    s = demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)
-    Xd = bin_spikes(s.spikes, num_units=len(s.units), bin_size=bs)
-    ax.imshow(
-        np.log1p(Xd.T),
-        aspect="auto",
-        cmap="Greys",
-        origin="lower",
-        interpolation="nearest",
-    )
-    ax.set_title(f"bin_size = {bs} s  ({Xd.shape[0]} bins)")
-    ax.set_xlabel("time bin")
-axes[0].set_ylabel("unit")
-fig.suptitle("Same 1.0 s window, three bin sizes: one parameter, no model change")
-plt.tight_layout()
-plt.show()
-
-# %% [markdown]
-# # 3. Longer or shorter context window
+# # %%
+# import os
+# import time
 #
-# The context window is how much time each sample spans; it lives in the
-# sampler/slice length, not in the data. A 2.0 s window simply yields 100 target
-# samples (at 50 Hz) and `2.0 / bin_size` input bins.
-
-# %%
-fig, axes = plt.subplots(1, 3, figsize=(12, 3), sharey=True)
-for ax, L in zip(axes, [0.5, 1.0, 2.0]):
-    s = demo_rec.slice(DEMO_T0, DEMO_T0 + L)
-    y = np.asarray(s.wheel.speed)
-    ax.plot(np.linspace(0, L, len(y)), y, color="#4C72B0")
-    ax.set_title(f"{L} s -> {len(y)} target samples")
-    ax.set_xlabel("time in window (s)")
-axes[0].set_ylabel("wheel speed")
-fig.suptitle("Same start, three context windows: only the slice length changes")
-plt.tight_layout()
-plt.show()
-
-# %% [markdown]
-# # 4. Augmentation via composable transforms
+# fpath = os.path.join(DATA_ROOT, "ibl_brain_wide_map_2025", f"{RECORDING_ID}.h5")
+# print(f"session file on disk:       {os.path.getsize(fpath) / 1e9:5.2f} GB")
 #
-# Transforms attach with `transform=` and chain with `Compose`; they run inside
-# `__getitem__`, so augmentation is re-drawn every epoch. Here a random 0.8 s crop
-# of the same window (a different crop each call). *(Time-warping augmentations
-# like `RandomTimeScaling` also exist; we revisit those separately.)*
-
-# %%
-augment = Compose([RandomCrop(0.8)])
-base = demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)
-y_base = np.asarray(base.wheel.speed)
-
-fig, axes = plt.subplots(1, 2, figsize=(10, 3), sharey=True)
-axes[0].plot(np.linspace(0, 1.0, len(y_base)), y_base, color="#333333")
-axes[0].set_title(f"raw (1.0 s, {len(y_base)} samples)")
-for _ in range(3):
-    a = augment(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0))
-    y_a = np.asarray(a.wheel.speed)
-    axes[1].plot(np.linspace(0, len(y_a) / 50.0, len(y_a)), y_a, alpha=0.7)
-axes[1].set_title("RandomCrop(0.8): a fresh crop each epoch")
-for ax in axes:
-    ax.set_xlabel("time (s)")
-axes[0].set_ylabel("wheel speed")
-fig.suptitle("A transform re-draws every epoch, combating overfitting for free")
-plt.tight_layout()
-plt.show()
-
-# %% [markdown]
-# # 5. Mask or select units
+# t = time.time()
+# _d = IBLBrainWideMap2025(root=DATA_ROOT, recording_id=RECORDING_ID, split=None)
+# _r = _d.get_recording(RECORDING_ID)
+# t_open = time.time() - t
 #
-# Units are a labelled axis, so you can drop or select them declaratively.
-# `UnitDropout` keeps a random subset each sample (augmentation / regularizer);
-# `UnitFilter` keeps a fixed subset, e.g. one brain region, turning "which region
-# drives wheel decoding?" into a one-line ablation.
-
-# %%
-# (a) UnitDropout: a different random subset of units each call
-for _ in range(5):
-    before = len(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0).units)
-    after = len(
-        UnitDropout(field="spikes")(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)).units
-    )
-    print(f"UnitDropout: {before} -> {after} units kept")
-
-# (b) UnitFilter: keep only units in one brain region (cosmos atlas)
-regions = np.asarray(demo_rec.units.region_cosmos)
-labels, counts = np.unique(regions, return_counts=True)
-fig, ax = plt.subplots(figsize=(7, 3))
-ax.bar([r.decode() for r in labels], counts, color="#4C72B0")
-ax.set_ylabel("units")
-ax.set_title("Units per brain region: UnitFilter selects any subset in one line")
-plt.tight_layout()
-plt.show()
-
-th_filter = UnitFilter(
-    mask_fn=lambda u: np.asarray(u.region_cosmos) == b"TH", field="spikes"
-)
-n_before = len(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0).units)
-n_after = len(th_filter(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)).units)
-print(f"UnitFilter to thalamus: {n_before} -> {n_after} units")
-
-# %% [markdown]
-# # 6. Sampling window with jitter
+# t = time.time()
+# for _ in range(20):
+#     _s = _r.slice(DEMO_T0, DEMO_T0 + 1.0)
+#     _ = bin_spikes(_s.spikes, num_units=len(_s.units), bin_size=BIN_SIZE)
+# t_slice = (time.time() - t) / 20
 #
-# `TrialSampler` emits the same fixed windows every epoch (reproducible eval).
-# `RandomFixedWindowSampler` applies a fresh random temporal jitter each epoch, so
-# the model sees slightly shifted positions within every interval: more effective
-# data, less positional overfitting. Only the sampler changes.
-
-# %%
-jitter_sampler = RandomFixedWindowSampler(
-    sampling_intervals={RECORDING_ID: demo_iv}, window_length=1.0
-)
-fixed_sampler = TrialSampler(sampling_intervals={RECORDING_ID: demo_iv})
-
-
-def first_starts(sampler, n=6):
-    return [round(float(idx.start), 2) for idx in list(sampler)[:n]]
-
-
-print("RandomFixedWindowSampler (jitter, new positions each epoch):")
-print("  epoch 1:", first_starts(jitter_sampler))
-print("  epoch 2:", first_starts(jitter_sampler))
-print("TrialSampler (fixed windows, identical each epoch):")
-print("  epoch 1:", first_starts(fixed_sampler))
-print("  epoch 2:", first_starts(fixed_sampler))
+# t = time.time()
+# _allt = np.asarray(_r.spikes.timestamps)
+# t_all = time.time() - t
+#
+# print(f"open dataset (lazy):        {t_open * 1000:5.1f} ms   (reads no signals)")
+# print(
+#     f"one 1.0 s window slice+bin: {t_slice * 1000:5.1f} ms   (reads only that window)"
+# )
+# _all_mb = _allt.nbytes / 1e6
+# print(
+#     f"load ALL spike timestamps:  {t_all * 1000:5.0f} ms   ({_all_mb:.0f} MB, one modality)"
+# )
+#
+# # %% [markdown]
+# # # 2. Change the bin size
+# #
+# # Binning is one parameter. Finer bins give more temporal resolution but a
+# # higher-dimensional, sparser input; coarser bins regularize. The model still
+# # just receives `(num_bins, num_units)`.
+#
+# # %%
+# fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
+# for ax, bs in zip(axes, [0.02, 0.05, 0.1]):
+#     s = demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)
+#     Xd = bin_spikes(s.spikes, num_units=len(s.units), bin_size=bs)
+#     ax.imshow(
+#         np.log1p(Xd.T),
+#         aspect="auto",
+#         cmap="Greys",
+#         origin="lower",
+#         interpolation="nearest",
+#     )
+#     ax.set_title(f"bin_size = {bs} s  ({Xd.shape[0]} bins)")
+#     ax.set_xlabel("time bin")
+# axes[0].set_ylabel("unit")
+# fig.suptitle("Same 1.0 s window, three bin sizes: one parameter, no model change")
+# plt.tight_layout()
+# plt.show()
+#
+# # %% [markdown]
+# # # 3. Longer or shorter context window
+# #
+# # The context window is how much time each sample spans; it lives in the
+# # sampler/slice length, not in the data. A 2.0 s window simply yields 100 target
+# # samples (at 50 Hz) and `2.0 / bin_size` input bins.
+#
+# # %%
+# fig, axes = plt.subplots(1, 3, figsize=(12, 3), sharey=True)
+# for ax, L in zip(axes, [0.5, 1.0, 2.0]):
+#     s = demo_rec.slice(DEMO_T0, DEMO_T0 + L)
+#     y = np.asarray(s.wheel.speed)
+#     ax.plot(np.linspace(0, L, len(y)), y, color="#4C72B0")
+#     ax.set_title(f"{L} s -> {len(y)} target samples")
+#     ax.set_xlabel("time in window (s)")
+# axes[0].set_ylabel("wheel speed")
+# fig.suptitle("Same start, three context windows: only the slice length changes")
+# plt.tight_layout()
+# plt.show()
+#
+# # %% [markdown]
+# # # 4. Augmentation via composable transforms
+# #
+# # Transforms attach with `transform=` and chain with `Compose`; they run inside
+# # `__getitem__`, so augmentation is re-drawn every epoch. Here a random 0.8 s crop
+# # of the same window (a different crop each call). *(Time-warping augmentations
+# # like `RandomTimeScaling` also exist; we revisit those separately.)*
+#
+# # %%
+# augment = Compose([RandomCrop(0.8)])
+# base = demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)
+# y_base = np.asarray(base.wheel.speed)
+#
+# fig, axes = plt.subplots(1, 2, figsize=(10, 3), sharey=True)
+# axes[0].plot(np.linspace(0, 1.0, len(y_base)), y_base, color="#333333")
+# axes[0].set_title(f"raw (1.0 s, {len(y_base)} samples)")
+# for _ in range(3):
+#     a = augment(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0))
+#     y_a = np.asarray(a.wheel.speed)
+#     axes[1].plot(np.linspace(0, len(y_a) / 50.0, len(y_a)), y_a, alpha=0.7)
+# axes[1].set_title("RandomCrop(0.8): a fresh crop each epoch")
+# for ax in axes:
+#     ax.set_xlabel("time (s)")
+# axes[0].set_ylabel("wheel speed")
+# fig.suptitle("A transform re-draws every epoch, combating overfitting for free")
+# plt.tight_layout()
+# plt.show()
+#
+# # %% [markdown]
+# # # 5. Mask or select units
+# #
+# # Units are a labelled axis, so you can drop or select them declaratively.
+# # `UnitDropout` keeps a random subset each sample (augmentation / regularizer);
+# # `UnitFilter` keeps a fixed subset, e.g. one brain region, turning "which region
+# # drives wheel decoding?" into a one-line ablation.
+#
+# # %%
+# # (a) UnitDropout: a different random subset of units each call
+# for _ in range(5):
+#     before = len(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0).units)
+#     after = len(
+#         UnitDropout(field="spikes")(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)).units
+#     )
+#     print(f"UnitDropout: {before} -> {after} units kept")
+#
+# # (b) UnitFilter: keep only units in one brain region (cosmos atlas)
+# regions = np.asarray(demo_rec.units.region_cosmos)
+# labels, counts = np.unique(regions, return_counts=True)
+# fig, ax = plt.subplots(figsize=(7, 3))
+# ax.bar([r.decode() for r in labels], counts, color="#4C72B0")
+# ax.set_ylabel("units")
+# ax.set_title("Units per brain region: UnitFilter selects any subset in one line")
+# plt.tight_layout()
+# plt.show()
+#
+# th_filter = UnitFilter(
+#     mask_fn=lambda u: np.asarray(u.region_cosmos) == b"TH", field="spikes"
+# )
+# n_before = len(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0).units)
+# n_after = len(th_filter(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)).units)
+# print(f"UnitFilter to thalamus: {n_before} -> {n_after} units")
+#
+# # %% [markdown]
+# # # 6. Sampling window with jitter
+# #
+# # `TrialSampler` emits the same fixed windows every epoch (reproducible eval).
+# # `RandomFixedWindowSampler` applies a fresh random temporal jitter each epoch, so
+# # the model sees slightly shifted positions within every interval: more effective
+# # data, less positional overfitting. Only the sampler changes.
+#
+# # %%
+# jitter_sampler = RandomFixedWindowSampler(
+#     sampling_intervals={RECORDING_ID: demo_iv}, window_length=1.0
+# )
+# fixed_sampler = TrialSampler(sampling_intervals={RECORDING_ID: demo_iv})
+#
+#
+# def first_starts(sampler, n=6):
+#     return [round(float(idx.start), 2) for idx in list(sampler)[:n]]
+#
+#
+# print("RandomFixedWindowSampler (jitter, new positions each epoch):")
+# print("  epoch 1:", first_starts(jitter_sampler))
+# print("  epoch 2:", first_starts(jitter_sampler))
+# print("TrialSampler (fixed windows, identical each epoch):")
+# print("  epoch 1:", first_starts(fixed_sampler))
+# print("  epoch 2:", first_starts(fixed_sampler))
