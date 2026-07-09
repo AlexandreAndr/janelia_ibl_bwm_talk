@@ -349,12 +349,16 @@ def _time_only_formatter():
 
 
 def _nice_step(raw_step):
-    """Round a raw tick step up to a clean 1/2/5 x 10^n value."""
+    """Round a raw tick step up to a clean 1/2/2.5/5 x 10^n value.
+
+    Includes 2.5 (not just 1/2/5/10) so the rounded ceiling doesn't overshoot
+    the actual max by up to 2x when raw_step lands just above 2 x 10^n.
+    """
     if raw_step <= 0:
         return 1.0
     exponent = np.floor(np.log10(raw_step))
     base = 10.0**exponent
-    for m in (1, 2, 5, 10):
+    for m in (1, 2, 2.5, 5, 10):
         if raw_step <= m * base:
             return m * base
     return 10.0 * base
