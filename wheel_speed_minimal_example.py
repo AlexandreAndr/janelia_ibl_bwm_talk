@@ -529,10 +529,10 @@ n_units = len(ov_rec.units.id)
 win = spk_t < ov_end
 spk_t, spk_u = spk_t[win], spk_u[win]
 
-# Bokeh draws every point in the browser (no rasterization), so we still thin:
-# keep ~70 units and cap the raster near a fixed glyph budget. Panning/zooming
-# still works, and every panel moves together.
-GLYPH_BUDGET = 30_000
+# Bokeh draws every point in the browser (no rasterization). Over just 10 min
+# the point counts are small enough that we set the budget above the actual
+# count, so stride below resolves to 1: no thinning, full resolution.
+GLYPH_BUDGET = 500_000
 keep = np.arange(0, n_units, max(1, n_units // 70))
 m = np.isin(spk_u, keep)
 sub_t = spk_t[m]
@@ -541,8 +541,12 @@ stride = max(1, len(sub_t) // GLYPH_BUDGET)
 raster = SimpleNamespace(timestamps=sub_t[::stride], unit_index=sub_row[::stride])
 
 
-def _thin(obj, field, target=6000, window_s=ov_end):
-    """Stride a 50 Hz signal down to ~target points, restricted to the first `window_s` s."""
+def _thin(obj, field, target=100_000, window_s=ov_end):
+    """Stride a 50 Hz signal down to ~target points, restricted to the first `window_s` s.
+
+    Over a 10 min window a 50 Hz signal is only ~30k samples, well under
+    `target`, so stride resolves to 1: this is full resolution, not thinning.
+    """
     ts = np.asarray(obj.timestamps)
     y = np.asarray(getattr(obj, field))
     w = ts < window_s
