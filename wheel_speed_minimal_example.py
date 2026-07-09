@@ -550,9 +550,9 @@ def _thin(obj, field, target=4000):
 # and the reset tool snaps back to this default window.
 DEFAULT_ZOOM_S = 300  # 5 minutes
 shared_x = Range1d(0.0, min(DEFAULT_ZOOM_S, T_END) * 1e3, bounds=(0.0, T_END * 1e3))
-W = 780
+W = 700
 
-p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=250)
+p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=220)
 p_raster.title.text = (
     f"One recording, one shared clock ({len(keep)} of {n_units} neurons)"
 )
@@ -562,7 +562,7 @@ p_movement = plot_intervals(
     x_range=shared_x,
     title="movement intervals",
     width=W,
-    height=50,
+    height=45,
 )
 
 p_wheel = plot_time_series(
@@ -571,7 +571,7 @@ p_wheel = plot_time_series(
     x_range=shared_x,
     y_axis_label="wheel speed",
     width=W,
-    height=90,
+    height=80,
 )
 p_whisk = plot_time_series(
     _thin(ov_rec.whisker, "motion_energy"),
@@ -579,7 +579,7 @@ p_whisk = plot_time_series(
     x_range=shared_x,
     y_axis_label="whisker ME",
     width=W,
-    height=90,
+    height=80,
 )
 p_paw = plot_time_series(
     _thin(ov_rec.paws, "left_paw_speed"),
@@ -587,7 +587,7 @@ p_paw = plot_time_series(
     x_range=shared_x,
     y_axis_label="L paw speed",
     width=W,
-    height=90,
+    height=80,
 )
 
 # Only the bottom panel needs to show the (shared) time axis.
