@@ -720,32 +720,6 @@ print(
 # :::
 
 # %% [markdown]
-# ## Transforms: deferring computation to each slice
-#
-# That last point is exactly what a **transform** is: a small function applied to a
-# window right after the lazy slice and before the model, inside `__getitem__`.
-# Because it runs per sample on a tiny crop, it is cheap, and swapping or chaining
-# transforms reshapes the pipeline without touching the data on disk or the model.
-#
-# Binning is the clearest example. Spikes arrive as an irregular event stream, but
-# the model wants a regular grid, so each window is binned on the fly. The bin
-# width is just a parameter: change it and the model input reshapes, with no
-# reprocessing.
-
-# %%
-from torch_brain.utils import bin_spikes
-
-window = lazy_rec.slice(t0, t0 + 1.0)
-for bs in (0.02, 0.05, 0.10):
-    Xb = bin_spikes(window.spikes, num_units=len(window.units), bin_size=bs)
-    print(f"bin_size = {bs:.2f} s  ->  X shape {tuple(Xb.shape)}  (bins x units)")
-
-# %% [markdown]
-# The same idea extends to context length, augmentation, unit selection, and
-# sampling jitter: each is a one-line change to the pipeline. The appendix,
-# *Why this framework is powerful*, works through them.
-
-# %% [markdown]
 # # Dataset, Sampler, and DataLoader
 #
 # TorchBrain's data pipeline for training is built from three cooperating
