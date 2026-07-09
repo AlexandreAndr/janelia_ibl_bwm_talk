@@ -1052,7 +1052,7 @@ test_ds = IBLBrainWideMap2025(
 test_sampler = TrialSampler(
     sampling_intervals=test_ds.get_sampling_intervals(), shuffle=False
 )
-test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE)
+test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, sampler=test_sampler)
 
 # %%
 print(f"Number of units: {train_ds.num_units}")
