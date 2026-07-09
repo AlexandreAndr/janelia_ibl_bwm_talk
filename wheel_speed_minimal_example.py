@@ -293,24 +293,47 @@ def _always_bundle(_objs: object) -> bool:
 _bokeh_bundle._use_widgets = _always_bundle
 _bokeh_bundle._use_tables = _always_bundle
 
+try:
+    import google.colab  # noqa: F401
+
+    _IN_COLAB = True
+except ImportError:
+    _IN_COLAB = False
+
+if _IN_COLAB:
+    from bokeh.io import output_notebook
+    from bokeh.io import show as _bokeh_show
+
+    output_notebook(hide_banner=True)
+
 
 def show(layout, title="torch-brain tutorial figure"):
-    """Render a Bokeh layout as one self-contained HTML blob (BokehJS + figure).
+    """Render a Bokeh layout.
 
-    `bokeh.io.show` instead relies on Jupyter "notebook comms": it loads
-    BokehJS once, in whichever cell runs first, and every later `show()` call
-    just assumes that copy is still on the page. That assumption breaks in
-    frontends that sandbox each cell's output separately (e.g. VS Code's
-    Jupyter extension), where the div silently stays empty. `file_html`
-    bundles BokehJS with the figure into one blob (~4 MB, via
-    `resources=INLINE`), so each cell renders on its own regardless of
-    frontend, and the same HTML also drops into the rendered GitHub Pages
+    On Colab, plain `bokeh.io.show` (Jupyter "notebook comms": BokehJS loads
+    once, in whichever cell runs first, and every later `show()` call just
+    assumes that copy is still on the page) works fine, since Colab is a real
+    Jupyter frontend. Using it there also avoids a DOM race between Colab's
+    sandboxed output iframe and a giant inline BokehJS+figure HTML blob,
+    which otherwise sometimes surfaces as a harmless but noisy `replaceChild`
+    error in the browser console.
+
+    Elsewhere, that notebook-comms assumption breaks in frontends that
+    sandbox each cell's output separately (e.g. VS Code's Jupyter
+    extension), where the div silently stays empty. So `file_html` bundles
+    BokehJS with the figure into one self-contained blob (~4 MB, via
+    `resources=INLINE`) instead, so each cell renders on its own regardless
+    of frontend, and the same HTML also drops into the rendered GitHub Pages
     site with no CDN needed at view time.
 
     Note the module-level patch above: it forces each blob to carry the full
-    library so widget cells still render when several blobs share one page.
+    library so widget cells still render when several blobs share one page
+    (only relevant to the non-Colab, `file_html` path).
     """
-    display(HTML(file_html(layout, INLINE, title)))
+    if _IN_COLAB:
+        _bokeh_show(layout)
+    else:
+        display(HTML(file_html(layout, INLINE, title)))
 
 
 def _x_only_tools():
