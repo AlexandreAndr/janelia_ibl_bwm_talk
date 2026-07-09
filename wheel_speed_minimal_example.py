@@ -506,6 +506,7 @@ def plot_intervals(*interval, x_range=None, title=None, width=800, height=200):
 
 
 # %%
+#| echo: false
 import gc
 from types import SimpleNamespace
 
