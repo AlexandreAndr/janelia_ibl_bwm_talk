@@ -842,7 +842,7 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 
 
 # %% [markdown]
-# ## Choosing a Sampler: trial-aligned vs. random windows
+# ## Choosing a Sampler
 #
 # The `Dataset` decides *where* sampling is allowed (`get_sampling_intervals`)
 # and how a window becomes `(X, y)` (`__getitem__`). It says nothing about *what
