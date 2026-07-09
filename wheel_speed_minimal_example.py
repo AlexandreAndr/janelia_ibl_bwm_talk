@@ -253,34 +253,22 @@ display(
 #
 # Because every modality is indexed by the same clock, we can line them up in one
 # interactive figure and explore them together. The panels below share a single
-# time axis (Bokeh's equivalent of matplotlib's `sharex`), so panning or zooming
-# any panel moves all of them in lockstep: the spiking of all neurons (top, with
-# units subsampled and their spikes thinned so a 65 min view stays responsive),
-# the task trials, and three behavioral signals. This is the whole recording at a
-# glance, and the raw material each training sample is later carved from.
+# time axis, so panning or zooming any panel moves all of them in lockstep: the
+# spiking of all neurons (top, with units subsampled and their spikes thinned so
+# a 65 min view stays responsive), the task trials, and three behavioral signals.
+# This is the whole recording at a glance, and the raw material each training
+# sample is later carved from.
 #
 # Use the toolbar (wheel zoom, box zoom, pan, reset) to drill into any stretch of
-# the session. Because Bokeh draws every point in the browser, the raster and the
-# 50 Hz signals are thinned for this overview; zoom in later to see a training
-# window at full resolution.
-#
-# Make every `file_html` blob carry the *full* BokehJS library, not the trimmed
-# subset Bokeh picks for one figure's models. By default a plain figure ships
-# core only while a Slider/Button layout also ships `bokeh-widgets`. When several
-# blobs share one page (the rendered Quarto/GitHub Pages site, or any notebook
-# frontend that runs outputs in one document) they race to define `window.Bokeh`
-# and the first to load wins. If that first blob was widget-free, `window.Bokeh`
-# is core-only and a later widget cell's embed throws "Model 'Slider' does not
-# exist" and renders nothing. Forcing every blob to include widgets makes
-# whichever loads first complete, so every later embed resolves against it.
-# import bokeh.embed.bundle as _bokeh_bundle  # noqa: E402
+# the session. The raster and the 50 Hz signals are thinned for this overview;
+# zoom in later to see a training window at full resolution.
 
 # %%
-#| code-fold: true
-#| code-summary: "Bokeh plotting helpers (spikes, intervals, time series)"
+#| echo: false
 # Small, reusable Bokeh helpers in the same style as the torch-brain tutorials:
 # one for an event raster, one for a labelled-interval strip, one for a line.
 # Each accepts an x_range so several panels can be locked to one shared time axis.
+import bokeh.embed.bundle as _bokeh_bundle  # noqa: E402
 from bokeh.embed import file_html
 from bokeh.layouts import column
 from bokeh.models import (
