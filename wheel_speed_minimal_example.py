@@ -172,14 +172,9 @@ from tqdm.auto import tqdm
 BIN_SIZE = 0.05  # seconds -> 20 spike bins over the 1.0 s context window
 BATCH_SIZE = 64
 EPOCHS = 100
-# LR and BIN_SIZE below are the best of a grid over
-# LR in {1e-4, 3e-4, 1e-3, 3e-3, 1e-2} x BIN_SIZE in {0.01, 0.02, 0.05, 0.1},
-# selected by validation R² for the TCN at 200 epochs (val 0.50, test 0.30).
 LR = 1e-4
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# The TCN's Conv1d layers see fixed input shapes, so let cuDNN autotune kernels.
-torch.backends.cudnn.benchmark = True
 print(f"Using device: {device}")
 
 # %% [markdown]
@@ -845,6 +840,215 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 
         return X, Y
 
+
+# %% [markdown]
+# ## Choosing a Sampler: trial-aligned vs. random windows
+#
+# The `Dataset` decides *where* sampling is allowed (`get_sampling_intervals`)
+# and how a window becomes `(X, y)` (`__getitem__`). It says nothing about *what
+# counts as one window* or *in what order* windows are drawn: that is the
+# sampler's job, and TorchBrain ships several in `torch_brain.samplers`. Below we
+# build the two most common, hand each the very same `Dataset`, and contrast
+# them:
+#
+# - **`TrialSampler`** treats every interval it is given as one complete sample.
+#   Fed the tight, 1.0 s movement windows from `get_sampling_intervals`, it emits
+#   exactly one window per trial, each locked to a movement onset. This is the
+#   trial-based paradigm: a sample *is* a task event.
+# - **`RandomFixedWindowSampler`** ignores trial structure. Given a broad,
+#   continuous interval (here the whole training block) and a `window_length`, it
+#   carves as many fixed-length windows as fit, each at a fresh **random offset**,
+#   and re-draws those offsets every epoch. This is the self-supervised /
+#   pretraining paradigm: sample the recording *everywhere*, not just at task
+#   events.
+#
+# The real difference is *who sets the window boundaries*: with `TrialSampler`
+# the **Dataset** does, upstream in `get_sampling_intervals`; with
+# `RandomFixedWindowSampler` the **sampler** does, via `window_length`. That is
+# also why we hand them different `sampling_intervals`: the tight per-trial
+# windows for one, the broad continuous `train_domain` for the other.
+
+# %%
+#| code-fold: show
+from torch_brain.data import Interval
+from torch_brain.samplers import RandomFixedWindowSampler, TrialSampler
+
+# One lazy Dataset handle for this section (the training pipeline below builds
+# its own train/val/test handles).
+demo_ds = IBLBrainWideMap2025(
+    DATA_ROOT, split="train", bin_size=BIN_SIZE, recording_id=RECORDING_ID
+)
+demo_rec = demo_ds.get_recording(RECORDING_ID)
+
+# (1) Trial-aligned: one window per movement trial. get_sampling_intervals()
+#     already cut the tight 1.0 s intervals, so the sampler just hands each back.
+trial_intervals = demo_ds.get_sampling_intervals()
+trial_sampler = TrialSampler(sampling_intervals=trial_intervals, shuffle=True)
+
+# (2) Random fixed windows: carve CONTEXT_WINDOW-long windows at random offsets
+#     from the *continuous* training block, re-jittered every epoch. We seed the
+#     RNG only so this notebook renders the same picture every time.
+broad_intervals = {RECORDING_ID: demo_rec.train_domain & demo_rec.wheel._domain}
+random_sampler = RandomFixedWindowSampler(
+    sampling_intervals=broad_intervals,
+    window_length=IBLBrainWideMap2025.CONTEXT_WINDOW,  # 1.0 s
+    generator=torch.Generator().manual_seed(3),
+)
+
+session_s = float(demo_rec.domain.end[-1])
+block_s = float(
+    np.sum(
+        np.asarray(broad_intervals[RECORDING_ID].end)
+        - np.asarray(broad_intervals[RECORDING_ID].start)
+    )
+)
+trial_cov_s = len(trial_sampler) * 1.0  # each movement window is 1.0 s
+rand_cov_s = len(random_sampler) * random_sampler.window_length
+print(
+    f"TrialSampler:             {len(trial_sampler):4d} windows / epoch  "
+    f"(one per trial, at movement onsets)"
+)
+print(
+    f"RandomFixedWindowSampler: {len(random_sampler):4d} windows / epoch  "
+    f"(tiling the {block_s:.0f}s training block)"
+)
+print()
+print(f"session length: {session_s:.0f}s")
+print(
+    f"  trial windows  cover {trial_cov_s:6.0f}s = "
+    f"{100 * trial_cov_s / session_s:4.1f}% of the session"
+)
+print(
+    f"  random windows cover {rand_cov_s:6.0f}s = "
+    f"{100 * rand_cov_s / session_s:4.1f}% of the session"
+)
+
+# %% [markdown]
+# The figure below makes the contrast concrete. The top pair spans the whole
+# ~809 s training block: the continuous wheel-speed signal, then the windows each
+# sampler emits (`TrialSampler` in red, then `RandomFixedWindowSampler` for two
+# separate epochs, in blue and green). At this scale the story is *coverage*: a
+# sparse scatter of trial windows against a near-solid tiling. The bottom pair
+# zooms to ~40 s, where two more things become visible: trial windows sit right
+# where the wheel speed lifts off (the movement onsets), while random windows
+# tile straight across regardless; and the blue and green rows are offset from
+# each other, the per-epoch jitter that doubles as free data augmentation.
+
+# %%
+#| code-fold: true
+#| code-summary: "Bokeh: TrialSampler vs RandomFixedWindowSampler windows (full block + zoom)"
+from types import SimpleNamespace
+
+from bokeh.models import Div
+
+
+def _windows_as_interval(sampler):
+    """The windows a sampler emits this epoch, as a time-sorted Interval.
+
+    The sampler yields (shuffled) DatasetIndex objects; for drawing we only need
+    their start/end, sorted so the strip reads left to right.
+    """
+    idx = list(sampler)
+    starts = np.array([i.start for i in idx], dtype=float)
+    ends = np.array([i.end for i in idx], dtype=float)
+    order = np.argsort(starts)
+    return Interval(start=starts[order], end=ends[order])
+
+
+trial_win = _windows_as_interval(trial_sampler)
+rand_win_1 = _windows_as_interval(random_sampler)  # epoch 1 offsets
+rand_win_2 = _windows_as_interval(random_sampler)  # epoch 2 offsets (re-jittered)
+
+tb_start = float(np.asarray(demo_rec.train_domain.start)[0])
+tb_end = float(np.asarray(demo_rec.train_domain.end)[-1])
+
+# Wheel-speed context, read once at full resolution. We mask by absolute time
+# rather than slice(), because slice() re-bases timestamps to 0.
+wheel_ts = np.asarray(demo_rec.wheel.timestamps)
+wheel_sp = np.asarray(demo_rec.wheel.speed)
+
+
+def _wheel_view(t0, t1, target=3000):
+    """Wheel speed over [t0, t1] (absolute seconds), thinned to ~target points."""
+    m = (wheel_ts >= t0) & (wheel_ts <= t1)
+    ts, sp = wheel_ts[m], wheel_sp[m]
+    step = max(1, len(ts) // target)
+    return SimpleNamespace(
+        timestamps=ts[::step],
+        speed=sp[::step],
+        domain=Interval(start=np.array([t0]), end=np.array([t1])),
+    )
+
+
+def _windows_fig(x_range, height):
+    """Three stacked strips: TrialSampler, then two RandomFixedWindow epochs."""
+    return plot_intervals(
+        trial_win,
+        rand_win_1,
+        rand_win_2,
+        x_range=x_range,
+        width=900,
+        height=height,
+    )
+
+
+legend = Div(
+    text=(
+        "<span style='color:red'>&#9632;</span> TrialSampler &nbsp;&nbsp;"
+        "<span style='color:blue'>&#9632;</span> RandomFixedWindow (epoch 1) &nbsp;&nbsp;"
+        "<span style='color:green'>&#9632;</span> RandomFixedWindow (epoch 2)"
+    )
+)
+
+# --- full training block: sparse trials vs. dense tiling ---
+full_x = Range1d(tb_start * 1e3, tb_end * 1e3, bounds=(tb_start * 1e3, tb_end * 1e3))
+p_wheel_full = plot_time_series(
+    _wheel_view(tb_start, tb_end),
+    "speed",
+    x_range=full_x,
+    y_axis_label="wheel speed",
+    width=900,
+    height=110,
+)
+p_wheel_full.title.text = (
+    f"Whole training block ({tb_end - tb_start:.0f}s): sparse trials vs. dense tiling"
+)
+p_wheel_full.xaxis.visible = False
+p_win_full = _windows_fig(full_x, height=110)
+p_win_full.xaxis.axis_label = "time in session"
+
+# --- ~40 s zoom, centered on a trial-dense stretch ---
+tw_starts = np.sort(np.asarray(trial_win.start))
+anchor = float(tw_starts[len(tw_starts) // 3])
+z0 = max(tb_start, anchor - 3.0)
+z1 = min(tb_end, z0 + 40.0)
+zoom_x = Range1d(z0 * 1e3, z1 * 1e3, bounds=(z0 * 1e3, z1 * 1e3))
+p_wheel_zoom = plot_time_series(
+    _wheel_view(z0, z1),
+    "speed",
+    x_range=zoom_x,
+    y_axis_label="wheel speed",
+    width=900,
+    height=120,
+)
+p_wheel_zoom.title.text = (
+    f"Zoom ({z1 - z0:.0f}s): trial windows align to movement onsets; "
+    f"random windows do not"
+)
+p_wheel_zoom.xaxis.visible = False
+p_win_zoom = _windows_fig(zoom_x, height=120)
+p_win_zoom.xaxis.axis_label = "time in session"
+
+show(column(legend, p_wheel_full, p_win_full, p_wheel_zoom, p_win_zoom))
+
+# %% [markdown]
+# For this tutorial we decode a **task-defined event**, the 1.0 s of wheel motion
+# right after each movement onset, so `TrialSampler` is the natural choice: every
+# sample is one clean, behavior-aligned trial. The training pipeline below
+# therefore wraps each split in a `TrialSampler`. `RandomFixedWindowSampler`
+# earns its place when you want to model the whole recording rather than isolated
+# events, for example self-supervised pretraining of a foundation model, which is
+# the direction the appendix points toward.
 
 # %% [markdown]
 # ## Building the train, validation, and test pipeline
