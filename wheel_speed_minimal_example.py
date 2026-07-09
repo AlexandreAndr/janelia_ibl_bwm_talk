@@ -869,7 +869,6 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 # windows for one, the broad continuous `train_domain` for the other.
 
 # %%
-#| code-fold: show
 from torch_brain.data import Interval
 from torch_brain.samplers import RandomFixedWindowSampler, TrialSampler
 
