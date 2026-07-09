@@ -108,7 +108,7 @@ if IN_COLAB:
             "pip",
             "install",
             "-q",
-            "torch-brain==0.2.0",
+            "torch_brain @ git+https://github.com/neuro-galaxy/torch_brain.git@deb39f026da33a93f9a95884eda82c1aa60dcd1a",
             "tqdm",
             "huggingface_hub",
             "bokeh",
@@ -181,17 +181,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # The TCN's Conv1d layers see fixed input shapes, so let cuDNN autotune kernels.
 torch.backends.cudnn.benchmark = True
 print(f"Using device: {device}")
-
-# DataLoader performance knobs. NUM_WORKERS>0 moves each __getitem__ call
-# (HDF5 read + spike binning) into separate worker processes, so it overlaps
-# with the GPU doing the previous batch's forward/backward instead of
-# blocking the main process. Colab's free tier usually gives 2 CPU cores, so
-# we cap at that; bump this up if you have more. PIN_MEMORY (+ non_blocking=True
-# on .to(device) below) lets the host->device copy run asynchronously, which
-# only matters when training on a GPU.
-NUM_WORKERS = min(4, os.cpu_count() or 1)
-PIN_MEMORY = device.type == "cuda"
-print(f"Using {NUM_WORKERS} dataloader workers, pin_memory={PIN_MEMORY}")
 
 # %% [markdown]
 # # A First Look at the Data
@@ -302,24 +291,23 @@ from bokeh.plotting import figure
 from bokeh.resources import INLINE
 
 # Make every `file_html` blob carry the *full* BokehJS library, not the trimmed
-# subset Bokeh would pick for the models in that one figure.
-#
-# By default Bokeh ships each standalone blob with only the JS bundles its models
-# need: a plain figure gets core only, a layout with a Slider/Button also gets
-# `bokeh-widgets`. That trimming is exactly what makes the interactive widget
-# cell render blank once several Bokeh outputs land on one page (the rendered
-# Quarto/GitHub Pages site, and any notebook frontend that runs every output in
-# one shared document). All blobs race to define `window.Bokeh`, and the first
-# one to load wins: the guard `if (typeof root.Bokeh === "undefined") ...` means
-# later copies never replace it. If that first blob was a widget-free plot,
-# `window.Bokeh` is a core-only copy with no Slider/Button models registered, so
-# a later widget cell's embed throws "Model 'Slider' does not exist" and draws
-# nothing. Forcing every blob to include widgets (and tables) makes whichever
-# loads first a complete instance, so every later embed resolves against it.
-import bokeh.embed.bundle as _bokeh_bundle
+# subset Bokeh picks for one figure's models. By default a plain figure ships
+# core only while a Slider/Button layout also ships `bokeh-widgets`. When several
+# blobs share one page (the rendered Quarto/GitHub Pages site, or any notebook
+# frontend that runs outputs in one document) they race to define `window.Bokeh`
+# and the first to load wins. If that first blob was widget-free, `window.Bokeh`
+# is core-only and a later widget cell's embed throws "Model 'Slider' does not
+# exist" and renders nothing. Forcing every blob to include widgets makes
+# whichever loads first complete, so every later embed resolves against it.
+import bokeh.embed.bundle as _bokeh_bundle  # noqa: E402
 
-_bokeh_bundle._use_widgets = lambda _objs: True
-_bokeh_bundle._use_tables = lambda _objs: True
+
+def _always_bundle(_objs: object) -> bool:
+    return True
+
+
+_bokeh_bundle._use_widgets = _always_bundle
+_bokeh_bundle._use_tables = _always_bundle
 
 
 def show(layout, title="torch-brain tutorial figure"):
@@ -899,14 +887,7 @@ train_sampler = TrialSampler(
 # GPU compute instead of blocking on it); persistent_workers keeps them alive
 # across epochs instead of respawning; pin_memory lets .to(device) below copy
 # asynchronously.
-train_loader = DataLoader(
-    train_ds,
-    batch_size=BATCH_SIZE,
-    sampler=train_sampler,
-    num_workers=NUM_WORKERS,
-    persistent_workers=NUM_WORKERS > 0,
-    pin_memory=PIN_MEMORY,
-)
+train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=train_sampler)
 print(f"Number of units: {train_ds.num_units}")
 print(f"Number of training samples: {len(train_sampler)}")
 
@@ -915,14 +896,7 @@ val_ds = IBLBrainWideMap2025(
     DATA_ROOT, split="val", bin_size=BIN_SIZE, recording_id=RECORDING_ID
 )
 val_sampler = TrialSampler(sampling_intervals=val_ds.get_sampling_intervals())
-val_loader = DataLoader(
-    val_ds,
-    batch_size=BATCH_SIZE,
-    sampler=val_sampler,
-    num_workers=NUM_WORKERS,
-    persistent_workers=NUM_WORKERS > 0,
-    pin_memory=PIN_MEMORY,
-)
+val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, sampler=val_sampler)
 print(f"Number of validation samples: {len(val_sampler)}")
 
 # Test Dataset, Sampler, and DataLoader.
@@ -932,13 +906,7 @@ test_ds = IBLBrainWideMap2025(
     DATA_ROOT, split="test", bin_size=BIN_SIZE, recording_id=RECORDING_ID
 )
 test_sampler = TrialSampler(sampling_intervals=test_ds.get_sampling_intervals())
-test_loader = DataLoader(
-    test_ds,
-    batch_size=BATCH_SIZE,
-    sampler=test_sampler,
-    num_workers=NUM_WORKERS,
-    pin_memory=PIN_MEMORY,
-)
+test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE)
 print(f"Number of test samples: {len(test_sampler)}")
 
 print(f"Number of units:  {train_ds.num_units}")
@@ -1049,8 +1017,13 @@ demo_X = []
 demo_Y = []
 for idx in demo_indices:
     Xd, Yd = train_ds[idx]
-    demo_X.append(Xd.T.numpy().tolist())  # (num_units, num_bins), for the image glyph
-    demo_Y.append(Yd[:, 0].numpy().tolist())  # (out_samples,)
+    # Keep the raster as a 2D numpy array, NOT `.tolist()`. Bokeh's `image` glyph
+    # needs a real 2D array; a nested Python list serializes in a way BokehJS
+    # reads as undefined ("expected a 2D array, not undefined"), which silently
+    # kills the whole cell's render. numpy serializes with shape metadata and
+    # works both for the initial draw and the CustomJS slider update below.
+    demo_X.append(Xd.T.numpy())  # (num_units, num_bins) 2D array for the image glyph
+    demo_Y.append(Yd[:, 0].numpy().tolist())  # (out_samples,) 1D list is fine for a line
 demo_starts = [float(idx.start) for idx in demo_indices]
 demo_ends = [float(idx.end) for idx in demo_indices]
 t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist()
@@ -1317,9 +1290,7 @@ val_r2_history = []
 for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
     model.train()
     for X, Y in train_loader:
-        # non_blocking=True only actually overlaps with pin_memory=True (set
-        # on the DataLoader above) and a CUDA device; it is a no-op otherwise.
-        X, Y = X.to(device, non_blocking=True), Y.to(device, non_blocking=True)
+        X, Y = X.to(device), Y.to(device)
         pred = model(X)
         loss = nn.functional.mse_loss(pred, Y)
         optim.zero_grad()
@@ -1330,7 +1301,7 @@ for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
         model.eval()
         preds, targets = [], []
         for X, Y in val_loader:
-            X, Y = X.to(device, non_blocking=True), Y.to(device, non_blocking=True)
+            X, Y = X.to(device), Y.to(device)
             preds.append(model(X))
             targets.append(Y)
         pred = torch.cat(preds).flatten(0, 1).cpu()
@@ -1398,7 +1369,7 @@ model.eval()
 with torch.no_grad():
     preds, targets = [], []
     for X, Y in test_loader:
-        X, Y = X.to(device, non_blocking=True), Y.to(device, non_blocking=True)
+        X, Y = X, Y = X.to(device), Y.to(device)
         preds.append(model(X))
         targets.append(Y)
     test_pred = torch.cat(preds).flatten(0, 1).cpu()
@@ -1499,4 +1470,3 @@ ATTR = "motion_energy"  # try: "motion_energy", "left_paw_speed", "right_paw_spe
 # (same pattern as "Creating the Datasets, Samplers, and DataLoaders" above),
 # then re-run the training loop on a fresh model instance and compare its
 # validation R² to wheel speed's.
-
