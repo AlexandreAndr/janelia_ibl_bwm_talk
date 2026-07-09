@@ -255,7 +255,7 @@ display(
 # interactive figure and explore them together. The panels below share a single
 # time axis, so panning or zooming any panel moves all of them in lockstep: the
 # spiking of all neurons (top, with units subsampled and their spikes thinned so
-# a 65 min view stays responsive), the task trials, and three behavioral signals.
+# a 65 min view stays responsive), the movement intervals, and three behavioral signals.
 # This is the whole recording at a glance, and the raw material each training
 # sample is later carved from.
 #
@@ -550,15 +550,19 @@ def _thin(obj, field, target=4000):
 # and the reset tool snaps back to this default window.
 DEFAULT_ZOOM_S = 300  # 5 minutes
 shared_x = Range1d(0.0, min(DEFAULT_ZOOM_S, T_END) * 1e3, bounds=(0.0, T_END * 1e3))
-W = 620
+W = 780
 
 p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=250)
 p_raster.title.text = (
     f"One recording, one shared clock ({len(keep)} of {n_units} neurons)"
 )
 
-p_trials = plot_intervals(
-    ov_rec.trials, x_range=shared_x, title="task trials", width=W, height=50
+p_movement = plot_intervals(
+    ov_rec.task_aligned_intervals.movement_intervals,
+    x_range=shared_x,
+    title="movement intervals",
+    width=W,
+    height=50,
 )
 
 p_wheel = plot_time_series(
@@ -587,7 +591,7 @@ p_paw = plot_time_series(
 )
 
 # Only the bottom panel needs to show the (shared) time axis.
-for p in (p_raster, p_trials, p_wheel, p_whisk):
+for p in (p_raster, p_movement, p_wheel, p_whisk):
     p.xaxis.visible = False
 p_paw.xaxis.axis_label = "time in session"
 
@@ -596,7 +600,7 @@ p_paw.xaxis.axis_label = "time in session"
 # content column.
 show(
     gridplot(
-        [[p_raster], [p_trials], [p_wheel], [p_whisk], [p_paw]],
+        [[p_raster], [p_movement], [p_wheel], [p_whisk], [p_paw]],
         toolbar_location="right",
         merge_tools=True,
     )
