@@ -270,7 +270,7 @@ display(
 # Each accepts an x_range so several panels can be locked to one shared time axis.
 import bokeh.embed.bundle as _bokeh_bundle  # noqa: E402
 from bokeh.embed import file_html
-from bokeh.layouts import column
+from bokeh.layouts import column, gridplot
 from bokeh.models import (
     BoxZoomTool,
     ColumnDataSource,
@@ -550,15 +550,15 @@ def _thin(obj, field, target=4000):
 # and the reset tool snaps back to this default window.
 DEFAULT_ZOOM_S = 300  # 5 minutes
 shared_x = Range1d(0.0, min(DEFAULT_ZOOM_S, T_END) * 1e3, bounds=(0.0, T_END * 1e3))
-W = 760
+W = 620
 
-p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=300)
+p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=250)
 p_raster.title.text = (
     f"One recording, one shared clock ({len(keep)} of {n_units} neurons)"
 )
 
 p_trials = plot_intervals(
-    ov_rec.trials, x_range=shared_x, title="task trials", width=W, height=65
+    ov_rec.trials, x_range=shared_x, title="task trials", width=W, height=50
 )
 
 p_wheel = plot_time_series(
@@ -567,7 +567,7 @@ p_wheel = plot_time_series(
     x_range=shared_x,
     y_axis_label="wheel speed",
     width=W,
-    height=110,
+    height=90,
 )
 p_whisk = plot_time_series(
     _thin(ov_rec.whisker, "motion_energy"),
@@ -575,7 +575,7 @@ p_whisk = plot_time_series(
     x_range=shared_x,
     y_axis_label="whisker ME",
     width=W,
-    height=110,
+    height=90,
 )
 p_paw = plot_time_series(
     _thin(ov_rec.paws, "left_paw_speed"),
@@ -583,7 +583,7 @@ p_paw = plot_time_series(
     x_range=shared_x,
     y_axis_label="L paw speed",
     width=W,
-    height=110,
+    height=90,
 )
 
 # Only the bottom panel needs to show the (shared) time axis.
@@ -591,7 +591,16 @@ for p in (p_raster, p_trials, p_wheel, p_whisk):
     p.xaxis.visible = False
 p_paw.xaxis.axis_label = "time in session"
 
-show(column(p_raster, p_trials, p_wheel, p_whisk, p_paw))
+# One merged toolbar for the whole column instead of one per panel: five
+# repeated toolbars ate up extra width and pushed the figure past the page's
+# content column.
+show(
+    gridplot(
+        [[p_raster], [p_trials], [p_wheel], [p_whisk], [p_paw]],
+        toolbar_location="right",
+        merge_tools=True,
+    )
+)
 
 # Free the spike arrays we pulled in just for the plot.
 del spk_t, spk_u, sub_t, sub_row, raster, ov_rec
