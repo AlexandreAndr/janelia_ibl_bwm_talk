@@ -596,12 +596,13 @@ for p in (p_raster, p_movement, p_wheel, p_whisk):
 p_paw.xaxis.axis_label = "time in session"
 
 # Drop the y axis line, tick marks, and numbers on the signal panels; the
-# axis label (e.g. "wheel speed") already says what each panel is.
+# axis label (e.g. "wheel speed") already says what each panel is. An empty
+# ticker (rather than hiding labels via font size) guarantees no tick or
+# number is drawn at all.
 for p in (p_wheel, p_whisk, p_paw):
     p.yaxis.axis_line_color = None
-    p.yaxis.major_tick_line_color = None
-    p.yaxis.minor_tick_line_color = None
-    p.yaxis.major_label_text_font_size = "0pt"
+    p.yaxis.ticker = FixedTicker(ticks=[])
+    p.ygrid.grid_line_color = None
 
 # One merged toolbar for the whole column instead of one per panel: five
 # repeated toolbars ate up extra width and pushed the figure past the page's
