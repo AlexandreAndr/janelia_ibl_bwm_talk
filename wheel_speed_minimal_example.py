@@ -268,6 +268,17 @@ display(
 # the session. Because Bokeh draws every point in the browser, the raster and the
 # 50 Hz signals are thinned for this overview; zoom in later to see a training
 # window at full resolution.
+#
+# Make every `file_html` blob carry the *full* BokehJS library, not the trimmed
+# subset Bokeh picks for one figure's models. By default a plain figure ships
+# core only while a Slider/Button layout also ships `bokeh-widgets`. When several
+# blobs share one page (the rendered Quarto/GitHub Pages site, or any notebook
+# frontend that runs outputs in one document) they race to define `window.Bokeh`
+# and the first to load wins. If that first blob was widget-free, `window.Bokeh`
+# is core-only and a later widget cell's embed throws "Model 'Slider' does not
+# exist" and renders nothing. Forcing every blob to include widgets makes
+# whichever loads first complete, so every later embed resolves against it.
+# import bokeh.embed.bundle as _bokeh_bundle  # noqa: E402
 
 # %%
 #| code-fold: true
@@ -289,17 +300,6 @@ from bokeh.models import (
 )
 from bokeh.plotting import figure
 from bokeh.resources import INLINE
-
-# Make every `file_html` blob carry the *full* BokehJS library, not the trimmed
-# subset Bokeh picks for one figure's models. By default a plain figure ships
-# core only while a Slider/Button layout also ships `bokeh-widgets`. When several
-# blobs share one page (the rendered Quarto/GitHub Pages site, or any notebook
-# frontend that runs outputs in one document) they race to define `window.Bokeh`
-# and the first to load wins. If that first blob was widget-free, `window.Bokeh`
-# is core-only and a later widget cell's embed throws "Model 'Slider' does not
-# exist" and renders nothing. Forcing every blob to include widgets makes
-# whichever loads first complete, so every later embed resolves against it.
-import bokeh.embed.bundle as _bokeh_bundle  # noqa: E402
 
 
 def _always_bundle(_objs: object) -> bool:
@@ -792,20 +792,6 @@ from torch_brain.utils import bin_spikes
 
 
 class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
-    """
-    Dataset for the IBL Brain-Wide Map (2025), for a single recording.
-
-    Args:
-        root: The root directory of the dataset.
-        dirname: The name of the dataset (and the directory containing its data).
-        recording_id: The recording id to load.
-        bin_size: The spike-binning width in seconds. Only required when the
-            dataset is actually indexed (i.e. not for exploration-only use).
-        split: The split of the dataset (train, val, test), or None to skip
-            split-based interval filtering (e.g. when just exploring a recording).
-
-    """
-
     # wheel speed is a 1D continuous signal, regularly sampled at BEHAVIOR_SFREQ (50 Hz).
     out_dim = 1
     spiking_dataset_mixin_uniquify_unit_ids = True
@@ -837,13 +823,12 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
     # get_sampling_intervals() returns {recording_id: Interval} listing
     # the windows the sampler may draw from.
     def get_sampling_intervals(self, *_args, **_kwargs):
-        rid = self.recording_id
-        recording = self.get_recording(rid)
+        recording = self.get_recording(self.recording_id)
 
         intervals = recording.task_aligned_intervals.movement_intervals
         intervals = intervals & getattr(recording, f"{self.split}_domain")
         intervals = intervals & recording.wheel._domain
-        return {rid: intervals}
+        return {self.recording_id: intervals}
 
     # `index` is a DatasetIndex(recording_id, start, end) produced by the sampler.
     def __getitem__(self, index: DatasetIndex):
@@ -853,10 +838,10 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
         # All models take (num_bins, num_units) and return (out_samples, out_dim).
 
         X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
-        X = torch.from_numpy(X).float()  # shape: (num_bins, num_units)
+        X = torch.from_numpy(X).float()
 
         Y = np.asarray(data.wheel.speed, dtype=np.float32)  # shape: (out_samples,)
-        Y = torch.from_numpy(Y).unsqueeze(-1)  # shape: (out_samples, out_dim=1)
+        Y = torch.from_numpy(Y).unsqueeze(-1)
 
         return X, Y
 
@@ -870,6 +855,7 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 # through a real training epoch's sample order interactively.
 
 # %%
+#| code-fold: false
 from torch.utils.data import DataLoader  # standard PyTorch loader
 from torch_brain.samplers import TrialSampler
 
@@ -878,37 +864,35 @@ train_ds = IBLBrainWideMap2025(
 )
 # We want to sample "one-trial-at-a-time", so we use the TrialSampler
 train_sampler = TrialSampler(
-    sampling_intervals=train_ds.get_sampling_intervals(),
-    shuffle=True,
+    sampling_intervals=train_ds.get_sampling_intervals(), shuffle=True
 )
-# Note the sampler is passed explicitly; it is not the default random/sequential
-# sampler PyTorch picks for an indexable dataset.
-# num_workers>0 loads batches in separate worker processes (overlapping with
-# GPU compute instead of blocking on it); persistent_workers keeps them alive
-# across epochs instead of respawning; pin_memory lets .to(device) below copy
-# asynchronously.
+
 train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=train_sampler)
-print(f"Number of units: {train_ds.num_units}")
-print(f"Number of training samples: {len(train_sampler)}")
 
 # Validation Dataset, Sampler, and DataLoader
 val_ds = IBLBrainWideMap2025(
     DATA_ROOT, split="val", bin_size=BIN_SIZE, recording_id=RECORDING_ID
 )
-val_sampler = TrialSampler(sampling_intervals=val_ds.get_sampling_intervals())
+val_sampler = TrialSampler(
+    sampling_intervals=val_ds.get_sampling_intervals(), shuffle=False
+)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, sampler=val_sampler)
-print(f"Number of validation samples: {len(val_sampler)}")
+
 
 # Test Dataset, Sampler, and DataLoader.
-# The test split is the *late* part of the session (causal split). We touch it
-# only once, for the final score after training/model selection is done.
 test_ds = IBLBrainWideMap2025(
     DATA_ROOT, split="test", bin_size=BIN_SIZE, recording_id=RECORDING_ID
 )
-test_sampler = TrialSampler(sampling_intervals=test_ds.get_sampling_intervals())
+test_sampler = TrialSampler(
+    sampling_intervals=test_ds.get_sampling_intervals(), shuffle=False
+)
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE)
-print(f"Number of test samples: {len(test_sampler)}")
 
+# %%
+print(f"Number of units: {train_ds.num_units}")
+print(f"Number of training samples: {len(train_sampler)}")
+print(f"Number of validation samples: {len(val_sampler)}")
+print(f"Number of test samples: {len(test_sampler)}")
 print(f"Number of units:  {train_ds.num_units}")
 print(f"Bins per sample:  {train_ds.num_bins}  (bin size = {BIN_SIZE}s)")
 print(f"Target samples:   {train_ds.out_samples}  (at {train_ds.out_sampling_rate} Hz)")
@@ -1023,7 +1007,9 @@ for idx in demo_indices:
     # kills the whole cell's render. numpy serializes with shape metadata and
     # works both for the initial draw and the CustomJS slider update below.
     demo_X.append(Xd.T.numpy())  # (num_units, num_bins) 2D array for the image glyph
-    demo_Y.append(Yd[:, 0].numpy().tolist())  # (out_samples,) 1D list is fine for a line
+    demo_Y.append(
+        Yd[:, 0].numpy().tolist()
+    )  # (out_samples,) 1D list is fine for a line
 demo_starts = [float(idx.start) for idx in demo_indices]
 demo_ends = [float(idx.end) for idx in demo_indices]
 t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist()
@@ -1256,6 +1242,7 @@ class TCN(nn.Module):
 # ## Instantiating the model
 
 # %%
+#| code-fold: false
 model = TCN(  # try: Linear, GRU, TCN
     in_units=train_ds.num_units,
     in_bins=train_ds.num_bins,
@@ -1281,6 +1268,7 @@ print(model)
 # R² score on the validation set at the end of each epoch.
 
 # %%
+#| code-fold: false
 from sklearn.metrics import r2_score
 
 optim = torch.optim.AdamW(model.parameters(), lr=LR)
