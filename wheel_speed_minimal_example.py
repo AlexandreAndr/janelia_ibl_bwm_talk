@@ -161,7 +161,7 @@ if not os.path.exists(_session_path):
 # tutorial.
 
 # %%
-#| code-fold: false
+#| code-fold: show
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -783,7 +783,7 @@ for bs in (0.02, 0.05, 0.10):
 #   the wheel speed.
 #
 # %%
-#| code-fold: false
+#| code-fold: show
 from pathlib import Path
 from typing import Literal
 
@@ -855,7 +855,7 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 # through a real training epoch's sample order interactively.
 
 # %%
-#| code-fold: false
+#| code-fold: show
 from torch.utils.data import DataLoader  # standard PyTorch loader
 from torch_brain.samplers import TrialSampler
 
@@ -1242,7 +1242,7 @@ class TCN(nn.Module):
 # ## Instantiating the model
 
 # %%
-#| code-fold: false
+#| code-fold: show
 model = TCN(  # try: Linear, GRU, TCN
     in_units=train_ds.num_units,
     in_bins=train_ds.num_bins,
@@ -1268,7 +1268,7 @@ print(model)
 # R² score on the validation set at the end of each epoch.
 
 # %%
-#| code-fold: false
+#| code-fold: show
 from sklearn.metrics import r2_score
 
 optim = torch.optim.AdamW(model.parameters(), lr=LR)
