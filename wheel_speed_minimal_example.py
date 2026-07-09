@@ -301,6 +301,26 @@ from bokeh.models import (
 from bokeh.plotting import figure
 from bokeh.resources import INLINE
 
+# Make every `file_html` blob carry the *full* BokehJS library, not the trimmed
+# subset Bokeh would pick for the models in that one figure.
+#
+# By default Bokeh ships each standalone blob with only the JS bundles its models
+# need: a plain figure gets core only, a layout with a Slider/Button also gets
+# `bokeh-widgets`. That trimming is exactly what makes the interactive widget
+# cell render blank once several Bokeh outputs land on one page (the rendered
+# Quarto/GitHub Pages site, and any notebook frontend that runs every output in
+# one shared document). All blobs race to define `window.Bokeh`, and the first
+# one to load wins: the guard `if (typeof root.Bokeh === "undefined") ...` means
+# later copies never replace it. If that first blob was a widget-free plot,
+# `window.Bokeh` is a core-only copy with no Slider/Button models registered, so
+# a later widget cell's embed throws "Model 'Slider' does not exist" and draws
+# nothing. Forcing every blob to include widgets (and tables) makes whichever
+# loads first a complete instance, so every later embed resolves against it.
+import bokeh.embed.bundle as _bokeh_bundle
+
+_bokeh_bundle._use_widgets = lambda _objs: True
+_bokeh_bundle._use_tables = lambda _objs: True
+
 
 def show(layout, title="torch-brain tutorial figure"):
     """Render a Bokeh layout as one self-contained HTML blob (BokehJS + figure).
@@ -314,6 +334,9 @@ def show(layout, title="torch-brain tutorial figure"):
     `resources=INLINE`), so each cell renders on its own regardless of
     frontend, and the same HTML also drops into the rendered GitHub Pages
     site with no CDN needed at view time.
+
+    Note the module-level patch above: it forces each blob to carry the full
+    library so widget cells still render when several blobs share one page.
     """
     display(HTML(file_html(layout, INLINE, title)))
 
