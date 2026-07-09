@@ -25,3 +25,14 @@ format:
     embed-resources: true
     fig-width: 8
     fig-height: 4.5
+    # Each Bokeh figure is embedded as a full `file_html` document, whose
+    # <head> style block sets `html, body { height: 100% }` on the whole page.
+    # That pins document.body.offsetHeight to the viewport height, so Quarto's
+    # TOC scrollspy (quarto.js `updateActiveLink`) always thinks the page is
+    # scrolled to the bottom and permanently highlights the last entry ("Hands
+    # On: Decode a Different Covariate"). Reset the height so the highlighted
+    # entry tracks the section actually in view. The plots use fixed pixel
+    # sizes, so this does not affect them.
+    include-in-header:
+      - text: |
+          <style>html, body { height: auto !important; }</style>
