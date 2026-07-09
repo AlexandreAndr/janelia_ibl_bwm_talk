@@ -254,14 +254,15 @@ display(
 # Because every modality is indexed by the same clock, we can line them up in one
 # interactive figure and explore them together. The panels below share a single
 # time axis, so panning or zooming any panel moves all of them in lockstep: the
-# spiking of all neurons (top, with units subsampled and their spikes thinned so
-# a 65 min view stays responsive), the movement intervals, and three behavioral signals.
-# This is the whole recording at a glance, and the raw material each training
-# sample is later carved from.
+# spiking of all neurons (top, with units subsampled), the movement intervals,
+# and three behavioral signals. This is the raw material each training sample
+# is later carved from.
 #
-# Use the toolbar (wheel zoom, box zoom, pan, reset) to drill into any stretch of
-# the session. The raster and the 50 Hz signals are thinned for this overview;
-# zoom in later to see a training window at full resolution.
+# The full session runs ~65 min; this overview intentionally covers only the
+# first 10 min, so the raster and the 50 Hz traces stay dense enough to be
+# useful once you zoom in. Use the toolbar (wheel zoom, box zoom, pan, reset)
+# to drill into that 10 min window; zoom in later to see a training window at
+# full resolution.
 
 # %%
 #| echo: false
@@ -517,14 +518,21 @@ ov_rec = BaseDataset(
 ).get_recording(RECORDING_ID)
 
 T_END = float(ov_rec.domain.end[-1])
+OV_WINDOW_S = 600.0  # overview covers only the first 10 min of the ~65 min session
+ov_end = min(OV_WINDOW_S, T_END)
 spk_t = np.asarray(ov_rec.spikes.timestamps)
 spk_u = np.asarray(ov_rec.spikes.unit_index)
 n_units = len(ov_rec.units.id)
 
-# Bokeh draws every point in the browser (no rasterization), so for a 65 min
-# overview we thin hard: keep ~70 units and cap the raster near a fixed glyph
-# budget. Panning/zooming still works, and every panel moves together.
-GLYPH_BUDGET = 20_000
+# Restrict to the first OV_WINDOW_S seconds before thinning, so the glyph
+# budget below buys resolution over 10 min instead of the whole session.
+win = spk_t < ov_end
+spk_t, spk_u = spk_t[win], spk_u[win]
+
+# Bokeh draws every point in the browser (no rasterization), so we still thin:
+# keep ~70 units and cap the raster near a fixed glyph budget. Panning/zooming
+# still works, and every panel moves together.
+GLYPH_BUDGET = 30_000
 keep = np.arange(0, n_units, max(1, n_units // 70))
 m = np.isin(spk_u, keep)
 sub_t = spk_t[m]
@@ -533,10 +541,12 @@ stride = max(1, len(sub_t) // GLYPH_BUDGET)
 raster = SimpleNamespace(timestamps=sub_t[::stride], unit_index=sub_row[::stride])
 
 
-def _thin(obj, field, target=4000):
-    """Stride a 50 Hz signal down to ~target points for a light overview line."""
+def _thin(obj, field, target=6000, window_s=ov_end):
+    """Stride a 50 Hz signal down to ~target points, restricted to the first `window_s` s."""
     ts = np.asarray(obj.timestamps)
     y = np.asarray(getattr(obj, field))
+    w = ts < window_s
+    ts, y = ts[w], y[w]
     s = max(1, len(ts) // target)
     sh = SimpleNamespace(timestamps=ts[::s], domain=obj.domain)
     setattr(sh, field, y[::s])
@@ -545,20 +555,25 @@ def _thin(obj, field, target=4000):
 
 # One shared time range links every panel: Bokeh's equivalent of sharex=True.
 # Times are passed in milliseconds because the helpers use a datetime x axis.
-# Start zoomed in on the first slice of the session rather than the full ~65
-# min recording; bounds keeps pan/zoom from ever leaving the session's extent,
-# and the reset tool snaps back to this default window.
+# Start zoomed in on the first slice of the 10 min overview window; bounds
+# keeps pan/zoom from leaving that window, and the reset tool snaps back to
+# this default view.
 DEFAULT_ZOOM_S = 300  # 5 minutes
-shared_x = Range1d(0.0, min(DEFAULT_ZOOM_S, T_END) * 1e3, bounds=(0.0, T_END * 1e3))
+shared_x = Range1d(0.0, min(DEFAULT_ZOOM_S, ov_end) * 1e3, bounds=(0.0, ov_end * 1e3))
 W = 700
 
 p_raster = plot_spikes(raster, x_range=shared_x, width=W, height=220)
 p_raster.title.text = (
-    f"One recording, one shared clock ({len(keep)} of {n_units} neurons)"
+    f"First {ov_end / 60:.0f} min of the session ({len(keep)} of {n_units} neurons)"
 )
 
+_mi = ov_rec.task_aligned_intervals.movement_intervals
+_mi_mask = np.asarray(_mi.start) < ov_end
+movement_ov = SimpleNamespace(
+    start=np.asarray(_mi.start)[_mi_mask], end=np.asarray(_mi.end)[_mi_mask]
+)
 p_movement = plot_intervals(
-    ov_rec.task_aligned_intervals.movement_intervals,
+    movement_ov,
     x_range=shared_x,
     title="movement intervals",
     width=W,
