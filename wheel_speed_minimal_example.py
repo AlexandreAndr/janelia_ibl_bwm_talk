@@ -1015,6 +1015,9 @@ def _wheel_view(t0, t1, target=3000):
     )
 
 
+W = 700
+
+
 def _windows_fig(x_range, height):
     """Three stacked strips: TrialSampler, then two RandomFixedWindow epochs."""
     return plot_intervals(
@@ -1022,7 +1025,7 @@ def _windows_fig(x_range, height):
         rand_win_1,
         rand_win_2,
         x_range=x_range,
-        width=900,
+        width=W,
         height=height,
     )
 
@@ -1042,7 +1045,7 @@ p_wheel_full = plot_time_series(
     "speed",
     x_range=full_x,
     y_axis_label="wheel speed",
-    width=900,
+    width=W,
     height=110,
 )
 p_wheel_full.title.text = (
@@ -1063,7 +1066,7 @@ p_wheel_zoom = plot_time_series(
     "speed",
     x_range=zoom_x,
     y_axis_label="wheel speed",
-    width=900,
+    width=W,
     height=120,
 )
 p_wheel_zoom.title.text = (
@@ -1191,6 +1194,7 @@ from bokeh.models import BoxAnnotation, Button, CustomJS, Div, Slider, Span
 recording = train_ds.get_recording(RECORDING_ID)
 split_t_end = float(recording.domain.end[-1])
 split_x_range = Range1d(0.0, split_t_end * 1e3, bounds=(0.0, split_t_end * 1e3))
+W = 700
 
 domains_fig = plot_intervals(
     recording.train_domain,
@@ -1198,7 +1202,7 @@ domains_fig = plot_intervals(
     recording.test_domain,
     x_range=split_x_range,
     title="train / val / test domain: one contiguous block each",
-    width=900,
+    width=W,
     height=90,
 )
 domains_fig.xaxis.visible = False
@@ -1213,7 +1217,7 @@ samples_fig = plot_intervals(
     test_intervals,
     x_range=split_x_range,
     title="sampling intervals actually drawn: movement windows within each split",
-    width=900,
+    width=W,
     height=90,
 )
 samples_fig.xaxis.axis_label = "time in session"
@@ -1261,7 +1265,7 @@ t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist
 
 raster_source = ColumnDataSource(data=dict(image=[demo_X[0]]))
 p_demo_raster = figure(
-    width=450,
+    width=W // 2,
     height=280,
     title="Binned spikes (X)",
     x_axis_label="Time bin",
@@ -1281,7 +1285,7 @@ p_demo_raster.yaxis.visible = False
 
 wheel_source = ColumnDataSource(data=dict(x=t_local, y=demo_Y[0]))
 p_demo_wheel = figure(
-    width=450,
+    width=W // 2,
     height=280,
     title="Wheel speed (Y)",
     x_axis_label="Time within window (s)",
