@@ -967,8 +967,7 @@ print(
 # that also lets the random sampler tile the whole training block over many epochs.
 
 # %%
-#| code-fold: true
-#| code-summary: "matplotlib GIF: how each sampler draws windows over 5 iterations"
+#| echo: false
 import base64
 import tempfile
 
