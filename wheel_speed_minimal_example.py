@@ -1232,14 +1232,16 @@ highlight = BoxAnnotation(
 )
 samples_fig.add_layout(highlight)
 
-# A thin blue line marking the center of the currently selected sample window.
-sample_marker = Span(location=0, dimension="height", line_color="blue", line_width=2)
+# A thin red line marking the center of the currently selected sample window.
+sample_marker = Span(location=0, dimension="height", line_color="red", line_width=2)
 samples_fig.add_layout(sample_marker)
 
 # Freeze one shuffled training-epoch order and precompute its (X, Y) pairs so
 # the slider below only ever swaps already-computed arrays, no HDF5 reads.
-N_DEMO = 12
-demo_indices = list(train_sampler)[:N_DEMO]
+# This walks the whole training epoch (all ~148 trials), not a small subset,
+# which adds a few MB of inlined data to this cell's output.
+demo_indices = list(train_sampler)
+N_DEMO = len(demo_indices)
 demo_X = []
 demo_Y = []
 for idx in demo_indices:
