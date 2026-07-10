@@ -8,7 +8,7 @@
 # clean directory with no .py beside it.
 #
 # The notebook must already carry its executed outputs (see README: run
-# `jupyter nbconvert --to notebook --execute --inplace wheel_speed_minimal_example.ipynb`
+# `jupyter nbconvert --to notebook --execute --inplace demo.ipynb`
 # once). Quarto does not execute anything here (execute.enabled: false).
 #
 # Usage:
@@ -17,7 +17,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-NB=wheel_speed_minimal_example.ipynb
+NB=demo.ipynb
 BUILD=.build
 
 rm -rf "$BUILD" _site
@@ -33,6 +33,6 @@ fi
 ( cd "$BUILD" && quarto render "$NB" -M embed-resources:true )
 mv "$BUILD/_site" _site
 # project.type: default renders to <name>.html; serve it at the site root too.
-cp _site/wheel_speed_minimal_example.html _site/index.html
+cp _site/demo.html _site/index.html
 rm -rf "$BUILD"
 echo "Built _site/ (open _site/index.html)"

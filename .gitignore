@@ -11,7 +11,7 @@ processed/
 
 # quarto / notebook render artifacts
 /_quarto_test.html
-/wheel_speed_minimal_example.html
+/demo.html
 /_site/
 /_freeze/
 /.build/

@@ -13,7 +13,7 @@ on:
     branches: [main]
     # Only rebuild when something that affects the render changes.
     paths:
-      - "wheel_speed_minimal_example.ipynb"
+      - "demo.ipynb"
       - "_quarto.yml"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
 
       # build.sh renders in an isolated dir (no sibling .py) so Quarto uses the
       # notebook's baked-in outputs and keeps code folding. It writes _site/ with
-      # both wheel_speed_minimal_example.html and an index.html copy at the root.
+      # both demo.html and an index.html copy at the root.
       - name: Build site
         run: ./build.sh
 

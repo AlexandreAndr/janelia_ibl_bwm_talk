@@ -10,8 +10,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-NB=wheel_speed_minimal_example.ipynb
-PY=wheel_speed_minimal_example.py
+NB=demo.ipynb
+PY=demo.py
 PYTHON="$PWD/.venv/bin/python"
 
 if [[ ! -x "$PYTHON" ]]; then

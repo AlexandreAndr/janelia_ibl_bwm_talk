@@ -8,8 +8,8 @@ decoders (Linear, GRU, TCN). Everything it needs lives in this folder.
 
 | Path | What it is |
 |------|------------|
-| `wheel_speed_minimal_example.py` | The example, as a jupytext percent-format script (source of truth for diffs). |
-| `wheel_speed_minimal_example.ipynb` | The same notebook in `.ipynb` form, paired to the `.py` (see [Notebook formats](#notebook-formats)). |
+| `demo.py` | The example, as a jupytext percent-format script (source of truth for diffs). |
+| `demo.ipynb` | The same notebook in `.ipynb` form, paired to the `.py` (see [Notebook formats](#notebook-formats)). |
 | `recording_ids.txt` | Recording-id list read by `IBLBrainWideMap2025` (defined in the script), holding the single session used here. |
 | [`ibl_brain_wide_map_2025/`](https://github.com/AlexandreAndr/janelia_ibl_bwm_talk/tree/main/ibl_brain_wide_map_2025) | This tutorial's own `brainsets` pipeline, kept local rather than in the [shared community pipelines](https://github.com/neuro-galaxy/torch_brain/tree/main/torch_brain/pipeline/brainsets-pipelines) because it's just an example for this tutorial. Its `recording_ids.txt` holds only the single session used here. |
 | `processed/` | Where the pipeline writes the processed `.h5` (download target). |
@@ -92,10 +92,10 @@ you also want the Colab path to pick it up.
 ## Run the example
 
 ```bash
-python wheel_speed_minimal_example.py
+python demo.py
 ```
 
-Or open `wheel_speed_minimal_example.ipynb` in Jupyter using the `./.venv` kernel.
+Or open `demo.ipynb` in Jupyter using the `./.venv` kernel.
 
 ## Notebook formats
 
@@ -104,13 +104,13 @@ The `.py` (jupytext percent format) and `.ipynb` are **paired** via
 `.ipynb` is the runnable/renderable copy. After editing either, sync the other:
 
 ```bash
-jupytext --sync wheel_speed_minimal_example.py    # or the .ipynb
+jupytext --sync demo.py    # or the .ipynb
 ```
 
 Regenerate the `.ipynb` from scratch if needed:
 
 ```bash
-jupytext --to ipynb wheel_speed_minimal_example.py
+jupytext --to ipynb demo.py
 ```
 
 ## Building docs with Quarto
@@ -127,7 +127,7 @@ then use `build.sh` to render:
 #    Re-run this whenever the code changes, then commit the .ipynb.
 QUARTO_PYTHON="$PWD/.venv/bin/python" \
   jupyter nbconvert --to notebook --execute --inplace \
-  wheel_speed_minimal_example.ipynb
+  demo.ipynb
 
 # 2. Build the self-contained site into ./_site (open _site/index.html).
 ./build.sh
@@ -150,7 +150,7 @@ from an isolated dir so folding is preserved):
 ```
 
 Then open <http://localhost:8080/>. To author a `.qmd` version instead,
-`quarto convert wheel_speed_minimal_example.ipynb`.
+`quarto convert demo.ipynb`.
 
 ### All-in-one: `preview.sh`
 

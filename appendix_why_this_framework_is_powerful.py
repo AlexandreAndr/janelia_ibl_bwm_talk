@@ -1,10 +1,10 @@
 # %% [markdown]
 # # Appendix: Why this framework is powerful
 #
-# *Moved out of `wheel_speed_minimal_example.ipynb` for standalone work; pending
+# *Moved out of `demo.ipynb` for standalone work; pending
 # reintegration into that notebook.*
 #
-# The training pipeline in `wheel_speed_minimal_example` is four independent
+# The training pipeline in `demo` is four independent
 # pieces: **Dataset** (*where* to sample), **Sampler** (*which* windows),
 # **Transform** (*how* to process), and **DataLoader** (*how* to batch). Because
 # they are decoupled, common neuroscience experiments (finer binning, more

@@ -2,7 +2,7 @@ project:
   type: default
   output-dir: _site
   render:
-    - wheel_speed_minimal_example.ipynb
+    - demo.ipynb
 
 # The notebook is committed WITH its cell outputs already baked in (execute it
 # locally once via `jupyter nbconvert --execute --inplace`, then commit). Quarto

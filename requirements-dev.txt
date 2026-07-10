@@ -1,5 +1,5 @@
 # Dev-only deps: notebook <-> .ipynb conversion, execution, and the Jupyter
-# kernel Quarto renders through. Not needed to just run wheel_speed_minimal_example.py.
+# kernel Quarto renders through. Not needed to just run demo.py.
 -r requirements.txt
 
 # Unpinned here (Colab provides these preinstalled, so no version is pinned
