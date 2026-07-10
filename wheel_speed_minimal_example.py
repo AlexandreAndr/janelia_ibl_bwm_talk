@@ -1181,12 +1181,14 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 # `TrialSampler.__iter__` draws a fresh `torch.randperm` and yields those
 # windows in a new random order; `val_sampler`/`test_sampler` stay in the
 # fixed order `sampling_intervals` was built in, for reproducible evaluation.
-# The slider below freezes one such training-epoch order: step through it to
-# see the corresponding window highlighted on the row above, and the
-# `(X, Y)` pair, binned spikes and wheel speed, it turns into.
+# The three sliders below freeze one such epoch order per split (train, val,
+# test): step through any of them to see the corresponding window highlighted,
+# in that split's color, on the row above, and the `(X, Y)` pair, binned spikes
+# and wheel speed, it turns into.
 
 # %%
 #| echo: false
+from bokeh.layouts import row as bokeh_row
 from bokeh.models import BoxAnnotation, CustomJS, Div, Slider, Span
 from bokeh.palettes import Greys256
 
@@ -1229,96 +1231,117 @@ legend = Div(
     )
 )
 
-# The moving highlight: one training window at a time, drawn on the row above.
-highlight = BoxAnnotation(
-    left=0, right=0, bottom=-0.45, top=0.45, fill_color="red", fill_alpha=0.35
-)
-samples_fig.add_layout(highlight)
+# One interactive column per split (train / val / test), side by side. Each
+# column has its own slider stepping through that split's samples, plus the
+# (X, Y) pair, and drops a color-matched highlight box + marker on the split's
+# own row of the samples_fig strip above (train=red row 0, val=blue row 1,
+# test=green row 2, matching plot_intervals' row order and colors).
+SPLITS = [
+    ("train", train_ds, train_sampler, "red", 0),
+    ("val", val_ds, val_sampler, "blue", 1),
+    ("test", test_ds, test_sampler, "green", 2),
+]
 
-# A thin red line marking the center of the currently selected sample window.
-sample_marker = Span(location=0, dimension="height", line_color="red", line_width=2)
-samples_fig.add_layout(sample_marker)
-
-# Freeze one shuffled training-epoch order and precompute its (X, Y) pairs so
-# the slider below only ever swaps already-computed arrays, no HDF5 reads.
-# This walks the whole training epoch (all ~148 trials), not a small subset,
-# which adds a few MB of inlined data to this cell's output.
-demo_indices = list(train_sampler)
-N_DEMO = len(demo_indices)
-demo_X = []
-demo_Y = []
-for idx in demo_indices:
-    Xd, Yd = train_ds[idx]
-    # Keep the raster as a 2D numpy array, NOT `.tolist()`. Bokeh's `image` glyph
-    # needs a real 2D array; a nested Python list serializes in a way BokehJS
-    # reads as undefined ("expected a 2D array, not undefined"), which silently
-    # kills the whole cell's render. numpy serializes with shape metadata and
-    # works both for the initial draw and the CustomJS slider update below.
-    demo_X.append(Xd.T.numpy())  # (num_units, num_bins) 2D array for the image glyph
-    demo_Y.append(
-        Yd[:, 0].numpy().tolist()
-    )  # (out_samples,) 1D list is fine for a line
-demo_starts = [float(idx.start) for idx in demo_indices]
-demo_ends = [float(idx.end) for idx in demo_indices]
+# CONTEXT_WINDOW / out_samples are identical across splits, so the target-time
+# axis for the wheel (Y) line is shared.
 t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist()
 
-raster_source = ColumnDataSource(data=dict(image=[demo_X[0]]))
-p_demo_raster = figure(
-    width=W,
-    height=280,
-    title="Binned spikes (X)",
-    x_axis_label="Time bin",
-    y_axis_label="Unit",
-    toolbar_location=None,
-)
-p_demo_raster.image(
-    image="image",
-    x=0,
-    y=0,
-    dw=train_ds.num_bins,
-    dh=train_ds.num_units,
-    source=raster_source,
-    # Greys256 runs black -> white; reversed so higher firing rate reads darker.
-    palette=list(reversed(Greys256)),
-)
-p_demo_raster.yaxis.visible = False
-p_demo_raster.grid.grid_line_color = None
+col_w = W // 3  # three columns share the width of the strips above
+split_columns = []
+for name, ds, sampler, color, row_i in SPLITS:
+    # Precompute this split's whole epoch of (X, Y) pairs so each slider only
+    # ever swaps already-computed arrays, no HDF5 reads. Keep each raster as a
+    # 2D numpy array, NOT `.tolist()`: Bokeh's `image` glyph needs a real 2D
+    # array (a nested Python list serializes as undefined and kills the render).
+    indices = list(sampler)
+    n = len(indices)
+    Xs, Ys = [], []
+    for idx in indices:
+        Xd, Yd = ds[idx]
+        Xs.append(Xd.T.numpy())  # (num_units, num_bins) 2D array for the image
+        Ys.append(Yd[:, 0].numpy().tolist())  # (out_samples,) 1D list for a line
+    starts = [float(idx.start) for idx in indices]
+    ends = [float(idx.end) for idx in indices]
 
-wheel_source = ColumnDataSource(data=dict(x=t_local, y=demo_Y[0]))
-p_demo_wheel = figure(
-    width=W,
-    height=280,
-    title="Wheel speed (Y)",
-    x_axis_label="Time within window (s)",
-    y_axis_label="Wheel speed",
-    toolbar_location=None,
-)
-p_demo_wheel.line("x", "y", source=wheel_source, line_width=2, color="green")
-p_demo_wheel.yaxis.visible = False
-p_demo_wheel.grid.grid_line_color = None
+    # The moving highlight + marker for this split's row on the strip above.
+    highlight = BoxAnnotation(
+        left=starts[0] * 1e3,
+        right=ends[0] * 1e3,
+        bottom=-row_i - 0.45,
+        top=-row_i + 0.45,
+        fill_color=color,
+        fill_alpha=0.35,
+    )
+    samples_fig.add_layout(highlight)
+    sample_marker = Span(
+        location=(starts[0] + ends[0]) * 0.5 * 1e3,
+        dimension="height",
+        line_color=color,
+        line_width=2,
+    )
+    samples_fig.add_layout(sample_marker)
 
-slider = Slider(
-    start=0,
-    end=N_DEMO - 1,
-    value=0,
-    step=1,
-    title="Sample index, in the order this epoch drew them",
-)
+    # X: binned-spike raster.
+    raster_source = ColumnDataSource(data=dict(image=[Xs[0]]))
+    p_raster = figure(
+        width=col_w,
+        height=220,
+        title=f"{name}: binned spikes (X)",
+        x_axis_label="Time bin",
+        y_axis_label="Unit",
+        toolbar_location=None,
+    )
+    p_raster.image(
+        image="image",
+        x=0,
+        y=0,
+        dw=ds.num_bins,
+        dh=ds.num_units,
+        source=raster_source,
+        # Greys256 runs black -> white; reversed so higher firing rate reads darker.
+        palette=list(reversed(Greys256)),
+    )
+    p_raster.yaxis.visible = False
+    p_raster.grid.grid_line_color = None
 
-step_callback = CustomJS(
-    args=dict(
-        slider=slider,
-        raster_source=raster_source,
-        wheel_source=wheel_source,
-        highlight=highlight,
-        sample_marker=sample_marker,
-        X_list=demo_X,
-        Y_list=demo_Y,
-        starts=demo_starts,
-        ends=demo_ends,
-        t_local=t_local,
-    ),
-    code="""
+    # Y: wheel speed.
+    wheel_source = ColumnDataSource(data=dict(x=t_local, y=Ys[0]))
+    p_wheel = figure(
+        width=col_w,
+        height=180,
+        title=f"{name}: wheel speed (Y)",
+        x_axis_label="Time within window (s)",
+        y_axis_label="Wheel speed",
+        toolbar_location=None,
+    )
+    p_wheel.line("x", "y", source=wheel_source, line_width=2, color="green")
+    p_wheel.yaxis.visible = False
+    p_wheel.grid.grid_line_color = None
+
+    slider = Slider(
+        start=0,
+        end=n - 1,
+        value=0,
+        step=1,
+        title=f"{name} sample index",
+        width=col_w - 20,
+    )
+    slider.js_on_change(
+        "value",
+        CustomJS(
+            args=dict(
+                slider=slider,
+                raster_source=raster_source,
+                wheel_source=wheel_source,
+                highlight=highlight,
+                sample_marker=sample_marker,
+                X_list=Xs,
+                Y_list=Ys,
+                starts=starts,
+                ends=ends,
+                t_local=t_local,
+            ),
+            code="""
     const i = slider.value
     raster_source.data = {image: [X_list[i]]}
     wheel_source.data = {x: t_local, y: Y_list[i]}
@@ -1326,21 +1349,17 @@ step_callback = CustomJS(
     highlight.right = ends[i] * 1e3
     sample_marker.location = (starts[i] + ends[i]) * 0.5 * 1e3
     """,
-)
-slider.js_on_change("value", step_callback)
-# Set the initial highlight position (the callback above only fires on change).
-highlight.left = demo_starts[0] * 1e3
-highlight.right = demo_ends[0] * 1e3
-sample_marker.location = (demo_starts[0] + demo_ends[0]) * 0.5 * 1e3
+        ),
+    )
+
+    split_columns.append(column(slider, p_raster, p_wheel))
 
 show(
     column(
         legend,
         domains_fig,
         samples_fig,
-        slider,
-        p_demo_raster,
-        p_demo_wheel,
+        bokeh_row(*split_columns),
     )
 )
 
