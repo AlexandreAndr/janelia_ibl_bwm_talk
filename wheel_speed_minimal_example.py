@@ -905,7 +905,6 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 # windows for one, the broad continuous `train_domain` for the other.
 
 # %%
-from torch_brain.data import Interval
 from torch_brain.samplers import RandomFixedWindowSampler, TrialSampler
 
 # One lazy Dataset handle for this section (the training pipeline below builds
@@ -959,125 +958,136 @@ print(
 )
 
 # %% [markdown]
-# The figure below makes the contrast concrete. The top pair spans the whole
-# ~809 s training block: the continuous wheel-speed signal, then the windows each
-# sampler emits (`TrialSampler` in red, then `RandomFixedWindowSampler` for two
-# separate epochs, in blue and green). At this scale the story is *coverage*: a
-# sparse scatter of trial windows against a near-solid tiling. The bottom pair
-# zooms to ~40 s, where two more things become visible: trial windows sit right
-# where the wheel speed lifts off (the movement onsets), while random windows
-# tile straight across regardless; and the blue and green rows are offset from
-# each other, the per-epoch jitter that doubles as free data augmentation.
+# The animation below makes the contrast concrete. Both panels show the same
+# ~40 s stretch of wheel speed (gray); on top of it, each panel shades the 1.0 s
+# windows its sampler draws on that iteration. Stepping through five iterations,
+# the `TrialSampler` windows stay put, pinned to the movement onsets where the
+# wheel speed lifts off, while the `RandomFixedWindowSampler` windows re-jitter to
+# fresh offsets each time. That per-iteration jitter is the free data augmentation
+# that also lets the random sampler tile the whole training block over many epochs.
 
 # %%
 #| code-fold: true
-#| code-summary: "Bokeh: TrialSampler vs RandomFixedWindowSampler windows (full block + zoom)"
-from types import SimpleNamespace
+#| code-summary: "matplotlib GIF: how each sampler draws windows over 5 iterations"
+import base64
+import tempfile
 
-from bokeh.models import Div
+from matplotlib.animation import FuncAnimation, PillowWriter
 
 
-def _windows_as_interval(sampler):
-    """The windows a sampler emits this epoch, as a time-sorted Interval.
+def _window_bounds(sampler):
+    """Start/end (seconds) of every window a sampler yields this epoch, time-sorted.
 
     The sampler yields (shuffled) DatasetIndex objects; for drawing we only need
     their start/end, sorted so the strip reads left to right.
     """
     idx = list(sampler)
-    starts = np.array([i.start for i in idx], dtype=float)
-    ends = np.array([i.end for i in idx], dtype=float)
+    starts = np.array([float(i.start) for i in idx])
+    ends = np.array([float(i.end) for i in idx])
     order = np.argsort(starts)
-    return Interval(start=starts[order], end=ends[order])
+    return starts[order], ends[order]
 
-
-trial_win = _windows_as_interval(trial_sampler)
-rand_win_1 = _windows_as_interval(random_sampler)  # epoch 1 offsets
-rand_win_2 = _windows_as_interval(random_sampler)  # epoch 2 offsets (re-jittered)
-
-tb_start = float(np.asarray(demo_rec.train_domain.start)[0])
-tb_end = float(np.asarray(demo_rec.train_domain.end)[-1])
 
 # Wheel-speed context, read once at full resolution. We mask by absolute time
 # rather than slice(), because slice() re-bases timestamps to 0.
 wheel_ts = np.asarray(demo_rec.wheel.timestamps)
 wheel_sp = np.asarray(demo_rec.wheel.speed)
 
+tb_start = float(np.asarray(demo_rec.train_domain.start)[0])
+tb_end = float(np.asarray(demo_rec.train_domain.end)[-1])
 
-def _wheel_view(t0, t1, target=3000):
-    """Wheel speed over [t0, t1] (absolute seconds), thinned to ~target points."""
-    m = (wheel_ts >= t0) & (wheel_ts <= t1)
-    ts, sp = wheel_ts[m], wheel_sp[m]
-    step = max(1, len(ts) // target)
-    return SimpleNamespace(
-        timestamps=ts[::step],
-        speed=sp[::step],
-        domain=Interval(start=np.array([t0]), end=np.array([t1])),
-    )
-
-
-W = 700
-
-
-def _windows_fig(x_range, height):
-    """Three stacked strips: TrialSampler, then two RandomFixedWindow epochs."""
-    return plot_intervals(
-        trial_win,
-        rand_win_1,
-        rand_win_2,
-        x_range=x_range,
-        width=W,
-        height=height,
-    )
-
-
-legend = Div(
-    text=(
-        "<span style='color:red'>&#9632;</span> TrialSampler &nbsp;&nbsp;"
-        "<span style='color:blue'>&#9632;</span> RandomFixedWindow (epoch 1) &nbsp;&nbsp;"
-        "<span style='color:green'>&#9632;</span> RandomFixedWindow (epoch 2)"
-    )
-)
-
-# --- full training block: sparse trials vs. dense tiling ---
-full_x = Range1d(tb_start * 1e3, tb_end * 1e3, bounds=(tb_start * 1e3, tb_end * 1e3))
-p_wheel_full = plot_time_series(
-    _wheel_view(tb_start, tb_end),
-    "speed",
-    x_range=full_x,
-    y_axis_label="wheel speed",
-    width=W,
-    height=110,
-)
-p_wheel_full.title.text = (
-    f"Whole training block ({tb_end - tb_start:.0f}s): sparse trials vs. dense tiling"
-)
-p_wheel_full.xaxis.visible = False
-p_win_full = _windows_fig(full_x, height=110)
-p_win_full.xaxis.axis_label = "time in session"
-
-# --- ~40 s zoom, centered on a trial-dense stretch ---
-tw_starts = np.sort(np.asarray(trial_win.start))
-anchor = float(tw_starts[len(tw_starts) // 3])
+# ~40 s zoom centered on a trial-dense stretch, so individual windows are legible.
+trial_starts, _ = _window_bounds(trial_sampler)
+anchor = float(np.sort(trial_starts)[len(trial_starts) // 3])
 z0 = max(tb_start, anchor - 3.0)
 z1 = min(tb_end, z0 + 40.0)
-zoom_x = Range1d(z0 * 1e3, z1 * 1e3, bounds=(z0 * 1e3, z1 * 1e3))
-p_wheel_zoom = plot_time_series(
-    _wheel_view(z0, z1),
-    "speed",
-    x_range=zoom_x,
-    y_axis_label="wheel speed",
-    width=W,
-    height=120,
-)
-p_wheel_zoom.title.text = (
-    f"Zoom ({z1 - z0:.0f}s): trial windows align to movement onsets; "
-    f"random windows do not"
-)
-p_wheel_zoom.xaxis.visible = False
-p_win_zoom = _windows_fig(zoom_x, height=120)
-p_win_zoom.xaxis.axis_label = "time in session"
 
-show(column(legend, p_wheel_full, p_win_full, p_wheel_zoom, p_win_zoom))
+# Wheel speed over the zoom window, thinned for a light background trace.
+m = (wheel_ts >= z0) & (wheel_ts <= z1)
+w_ts, w_sp = wheel_ts[m], wheel_sp[m]
+step = max(1, len(w_ts) // 3000)
+w_ts, w_sp = w_ts[::step], w_sp[::step]
+
+N_ITER = 5
+# The windows each sampler emits on iterations 1..N. TrialSampler returns the
+# same positions every time (only the draw order is reshuffled); the
+# RandomFixedWindowSampler re-jitters its offsets, so its windows move each time.
+trial_epochs = [_window_bounds(trial_sampler) for _ in range(N_ITER)]
+random_epochs = [_window_bounds(random_sampler) for _ in range(N_ITER)]
+
+RED, BLUE, GRAY = "#d62728", "#1f77b4", "#888888"
+
+
+def _draw_trials(ax, starts, ends, color):
+    """Shade the sparse, trial-aligned windows that fall inside the zoom range."""
+    vis = (ends >= z0) & (starts <= z1)
+    for s, e in zip(starts[vis], ends[vis]):
+        ax.axvspan(max(s, z0), min(e, z1), color=color, alpha=0.40, lw=0)
+
+
+def _draw_tiling(ax, starts, ends, color):
+    """Draw the contiguous fixed-window tiling as a striped grid.
+
+    RandomFixedWindowSampler packs 1.0 s windows edge to edge, so a plain fill
+    would paint the panel solid. We alternate-shade adjacent windows and mark
+    every boundary, turning the sub-second per-iteration jitter (a global shift
+    of the whole grid) into a stripe pattern you can watch slide.
+    """
+    s0 = float(starts.min())  # per-iteration reference so stripe parity stays put
+    vis = (ends >= z0) & (starts <= z1)
+    for s, e in zip(starts[vis], ends[vis]):
+        if int(round(s - s0)) % 2 == 0:
+            ax.axvspan(max(s, z0), min(e, z1), color=color, alpha=0.30, lw=0)
+        if z0 <= s <= z1:
+            ax.axvline(s, color=color, lw=0.8, alpha=0.6)
+
+
+fig, (ax_top, ax_bot) = plt.subplots(
+    2, 1, sharex=True, figsize=(9, 4.5), constrained_layout=True
+)
+
+
+def _render(k):
+    for ax in (ax_top, ax_bot):
+        ax.clear()
+        ax.plot(w_ts, w_sp, color=GRAY, lw=1.0)
+        ax.set_xlim(z0, z1)
+        ax.set_ylabel("wheel speed")
+        ax.set_yticks([])
+
+    ts_starts, ts_ends = trial_epochs[k]
+    rs_starts, rs_ends = random_epochs[k]
+    _draw_trials(ax_top, ts_starts, ts_ends, RED)
+    _draw_tiling(ax_bot, rs_starts, rs_ends, BLUE)
+
+    ax_top.set_title(
+        "TrialSampler: same windows every iteration (aligned to movement onsets)",
+        color=RED,
+        fontsize=10,
+    )
+    ax_bot.set_title(
+        "RandomFixedWindowSampler: re-jittered every iteration",
+        color=BLUE,
+        fontsize=10,
+    )
+    ax_bot.set_xlabel("time in session (s)")
+    fig.suptitle(f"Sampling iteration {k + 1} / {N_ITER}", fontsize=12)
+
+
+anim = FuncAnimation(fig, _render, frames=N_ITER, interval=1000)
+with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
+    anim.save(tmp.name, writer=PillowWriter(fps=1))
+    gif_bytes = open(tmp.name, "rb").read()
+plt.close(fig)  # suppress the extra static frame the figure would render inline
+
+gif_b64 = base64.b64encode(gif_bytes).decode("ascii")
+display(
+    HTML(
+        f'<img src="data:image/gif;base64,{gif_b64}" '
+        'alt="TrialSampler vs RandomFixedWindowSampler over 5 iterations" '
+        'style="max-width:100%">'
+    )
+)
 
 # %% [markdown]
 # For this tutorial we decode a **task-defined event**, the 1.0 s of wheel motion
