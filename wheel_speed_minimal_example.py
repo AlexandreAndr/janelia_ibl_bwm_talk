@@ -1186,9 +1186,7 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 # `(X, Y)` pair, binned spikes and wheel speed, it turns into.
 
 # %%
-#| code-fold: true
-#| code-summary: "Bokeh: split domains, sampling intervals, and an interactive sample stepper"
-from bokeh.layouts import row as bokeh_row
+#| echo: false
 from bokeh.models import BoxAnnotation, CustomJS, Div, Slider, Span
 from bokeh.palettes import Greys256
 
@@ -1266,7 +1264,7 @@ t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist
 
 raster_source = ColumnDataSource(data=dict(image=[demo_X[0]]))
 p_demo_raster = figure(
-    width=W // 2,
+    width=W,
     height=280,
     title="Binned spikes (X)",
     x_axis_label="Time bin",
@@ -1288,7 +1286,7 @@ p_demo_raster.grid.grid_line_color = None
 
 wheel_source = ColumnDataSource(data=dict(x=t_local, y=demo_Y[0]))
 p_demo_wheel = figure(
-    width=W // 2,
+    width=W,
     height=280,
     title="Wheel speed (Y)",
     x_axis_label="Time within window (s)",
@@ -1341,7 +1339,8 @@ show(
         domains_fig,
         samples_fig,
         slider,
-        bokeh_row(p_demo_raster, p_demo_wheel),
+        p_demo_raster,
+        p_demo_wheel,
     )
 )
 
