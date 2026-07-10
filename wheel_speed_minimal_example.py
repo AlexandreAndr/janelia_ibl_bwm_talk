@@ -1189,7 +1189,7 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 #| code-fold: true
 #| code-summary: "Bokeh: split domains, sampling intervals, and an interactive sample stepper"
 from bokeh.layouts import row as bokeh_row
-from bokeh.models import BoxAnnotation, Button, CustomJS, Div, Slider, Span
+from bokeh.models import BoxAnnotation, CustomJS, Div, Slider, Span
 
 recording = train_ds.get_recording(RECORDING_ID)
 split_t_end = float(recording.domain.end[-1])
@@ -1282,6 +1282,7 @@ p_demo_raster.image(
     palette="Greys256",
 )
 p_demo_raster.yaxis.visible = False
+p_demo_raster.grid.grid_line_color = None
 
 wheel_source = ColumnDataSource(data=dict(x=t_local, y=demo_Y[0]))
 p_demo_wheel = figure(
@@ -1294,10 +1295,8 @@ p_demo_wheel = figure(
 )
 p_demo_wheel.line("x", "y", source=wheel_source, line_width=2, color="green")
 p_demo_wheel.yaxis.visible = False
+p_demo_wheel.grid.grid_line_color = None
 
-info_div = Div(
-    text=f"Sample 1 / {N_DEMO} (start={demo_starts[0]:.2f}s, end={demo_ends[0]:.2f}s)"
-)
 slider = Slider(
     start=0,
     end=N_DEMO - 1,
@@ -1305,15 +1304,12 @@ slider = Slider(
     step=1,
     title="Sample index, in the order this epoch drew them",
 )
-prev_btn = Button(label="< Prev", width=70)
-next_btn = Button(label="Next >", width=70)
 
 step_callback = CustomJS(
     args=dict(
         slider=slider,
         raster_source=raster_source,
         wheel_source=wheel_source,
-        info_div=info_div,
         highlight=highlight,
         sample_marker=sample_marker,
         X_list=demo_X,
@@ -1321,7 +1317,6 @@ step_callback = CustomJS(
         starts=demo_starts,
         ends=demo_ends,
         t_local=t_local,
-        n_demo=N_DEMO,
     ),
     code="""
     const i = slider.value
@@ -1330,21 +1325,9 @@ step_callback = CustomJS(
     highlight.left = starts[i] * 1e3
     highlight.right = ends[i] * 1e3
     sample_marker.location = (starts[i] + ends[i]) * 0.5 * 1e3
-    info_div.text = `Sample ${i + 1} / ${n_demo} (start=${starts[i].toFixed(2)}s, end=${ends[i].toFixed(2)}s)`
     """,
 )
 slider.js_on_change("value", step_callback)
-prev_btn.js_on_click(
-    CustomJS(
-        args=dict(slider=slider), code="slider.value = Math.max(0, slider.value - 1)"
-    )
-)
-next_btn.js_on_click(
-    CustomJS(
-        args=dict(slider=slider, n_demo=N_DEMO),
-        code="slider.value = Math.min(n_demo - 1, slider.value + 1)",
-    )
-)
 # Set the initial highlight position (the callback above only fires on change).
 highlight.left = demo_starts[0] * 1e3
 highlight.right = demo_ends[0] * 1e3
@@ -1355,8 +1338,7 @@ show(
         legend,
         domains_fig,
         samples_fig,
-        bokeh_row(prev_btn, slider, next_btn),
-        info_div,
+        slider,
         bokeh_row(p_demo_raster, p_demo_wheel),
     )
 )
