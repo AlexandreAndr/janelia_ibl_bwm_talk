@@ -1305,6 +1305,7 @@ for name, ds, sampler, color, row_i, light_color in SPLITS:
         palette=list(reversed(Greys256)),
     )
     p_raster.yaxis.visible = False
+    p_raster.xaxis.visible = False
     p_raster.grid.grid_line_color = None
 
     # Y: wheel speed.
@@ -1320,6 +1321,10 @@ for name, ds, sampler, color, row_i, light_color in SPLITS:
     p_wheel.line("x", "y", source=wheel_source, line_width=2, color="black")
     p_wheel.yaxis.visible = False
     p_wheel.grid.grid_line_color = None
+    # Sparse, round x ticks (0, 0.2, 0.4, ... up to the context window).
+    p_wheel.xaxis.ticker = FixedTicker(
+        ticks=list(np.round(np.arange(0.0, ds.CONTEXT_WINDOW + 1e-9, 0.2), 2))
+    )
 
     slider = Slider(
         start=0,
