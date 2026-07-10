@@ -1186,7 +1186,7 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 #| code-fold: true
 #| code-summary: "Bokeh: split domains, sampling intervals, and an interactive sample stepper"
 from bokeh.layouts import row as bokeh_row
-from bokeh.models import BoxAnnotation, Button, CustomJS, Div, Slider
+from bokeh.models import BoxAnnotation, Button, CustomJS, Div, Slider, Span
 
 recording = train_ds.get_recording(RECORDING_ID)
 split_t_end = float(recording.domain.end[-1])
@@ -1232,6 +1232,10 @@ highlight = BoxAnnotation(
 )
 samples_fig.add_layout(highlight)
 
+# A thin blue line marking the center of the currently selected sample window.
+sample_marker = Span(location=0, dimension="height", line_color="blue", line_width=2)
+samples_fig.add_layout(sample_marker)
+
 # Freeze one shuffled training-epoch order and precompute its (X, Y) pairs so
 # the slider below only ever swaps already-computed arrays, no HDF5 reads.
 N_DEMO = 12
@@ -1255,7 +1259,7 @@ t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist
 
 raster_source = ColumnDataSource(data=dict(image=[demo_X[0]]))
 p_demo_raster = figure(
-    width=380,
+    width=450,
     height=280,
     title="Binned spikes (X)",
     x_axis_label="Time bin",
@@ -1271,10 +1275,11 @@ p_demo_raster.image(
     source=raster_source,
     palette="Greys256",
 )
+p_demo_raster.yaxis.visible = False
 
 wheel_source = ColumnDataSource(data=dict(x=t_local, y=demo_Y[0]))
 p_demo_wheel = figure(
-    width=380,
+    width=450,
     height=280,
     title="Wheel speed (Y)",
     x_axis_label="Time within window (s)",
@@ -1282,6 +1287,7 @@ p_demo_wheel = figure(
     toolbar_location=None,
 )
 p_demo_wheel.line("x", "y", source=wheel_source, line_width=2, color="green")
+p_demo_wheel.yaxis.visible = False
 
 info_div = Div(
     text=f"Sample 1 / {N_DEMO} (start={demo_starts[0]:.2f}s, end={demo_ends[0]:.2f}s)"
@@ -1303,6 +1309,7 @@ step_callback = CustomJS(
         wheel_source=wheel_source,
         info_div=info_div,
         highlight=highlight,
+        sample_marker=sample_marker,
         X_list=demo_X,
         Y_list=demo_Y,
         starts=demo_starts,
@@ -1316,6 +1323,7 @@ step_callback = CustomJS(
     wheel_source.data = {x: t_local, y: Y_list[i]}
     highlight.left = starts[i] * 1e3
     highlight.right = ends[i] * 1e3
+    sample_marker.location = (starts[i] + ends[i]) * 0.5 * 1e3
     info_div.text = `Sample ${i + 1} / ${n_demo} (start=${starts[i].toFixed(2)}s, end=${ends[i].toFixed(2)}s)`
     """,
 )
@@ -1334,6 +1342,7 @@ next_btn.js_on_click(
 # Set the initial highlight position (the callback above only fires on change).
 highlight.left = demo_starts[0] * 1e3
 highlight.right = demo_ends[0] * 1e3
+sample_marker.location = (demo_starts[0] + demo_ends[0]) * 0.5 * 1e3
 
 show(
     column(
