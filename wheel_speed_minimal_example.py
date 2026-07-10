@@ -1190,6 +1190,7 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 #| code-summary: "Bokeh: split domains, sampling intervals, and an interactive sample stepper"
 from bokeh.layouts import row as bokeh_row
 from bokeh.models import BoxAnnotation, CustomJS, Div, Slider, Span
+from bokeh.palettes import Greys256
 
 recording = train_ds.get_recording(RECORDING_ID)
 split_t_end = float(recording.domain.end[-1])
@@ -1279,7 +1280,8 @@ p_demo_raster.image(
     dw=train_ds.num_bins,
     dh=train_ds.num_units,
     source=raster_source,
-    palette="Greys256",
+    # Greys256 runs black -> white; reversed so higher firing rate reads darker.
+    palette=list(reversed(Greys256)),
 )
 p_demo_raster.yaxis.visible = False
 p_demo_raster.grid.grid_line_color = None
