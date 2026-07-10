@@ -1238,11 +1238,11 @@ legend = Div(
 # (X, Y) pair, and drops a color-matched highlight box + marker on the split's
 # own row of the samples_fig strip above (train=red row 0, val=blue row 1,
 # test=green row 2, matching plot_intervals' row order and colors).
-# Each tuple: (name, dataset, sampler, strip color, strip row, light slider color).
+# Each tuple: (name, dataset, sampler, color, strip row).
 SPLITS = [
-    ("train", train_ds, train_sampler, "red", 0, "lightcoral"),
-    ("val", val_ds, val_sampler, "blue", 1, "lightblue"),
-    ("test", test_ds, test_sampler, "green", 2, "lightgreen"),
+    ("train", train_ds, train_sampler, "red", 0),
+    ("val", val_ds, val_sampler, "blue", 1),
+    ("test", test_ds, test_sampler, "green", 2),
 ]
 
 # CONTEXT_WINDOW / out_samples are identical across splits, so the target-time
@@ -1251,7 +1251,7 @@ t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist
 
 col_w = W // 3  # three columns share the width of the strips above
 split_columns = []
-for name, ds, sampler, color, row_i, light_color in SPLITS:
+for name, ds, sampler, color, row_i in SPLITS:
     # Precompute this split's whole epoch of (X, Y) pairs so each slider only
     # ever swaps already-computed arrays, no HDF5 reads. Keep each raster as a
     # 2D numpy array, NOT `.tolist()`: Bokeh's `image` glyph needs a real 2D
@@ -1333,7 +1333,7 @@ for name, ds, sampler, color, row_i, light_color in SPLITS:
         step=1,
         title=f"{name} sample index",
         width=col_w - 20,
-        bar_color=light_color,
+        bar_color=color,
     )
     slider.js_on_change(
         "value",
