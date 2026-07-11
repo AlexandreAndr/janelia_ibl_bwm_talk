@@ -73,12 +73,11 @@
 # never written to disk.
 #
 # ::: {.callout-tip title="Bring your own preprocessing"}
-# A `brainsets` pipeline is just plain Python, so any preprocessing you want,
+# A `brainsets` pipeline is written in Python, so any preprocessing you want,
 # quality filtering, rescaling, custom features, unit selection, is ordinary
 # code you drop into the pipeline alongside every other step, with no special
 # API to learn. The good-units filter above is one illustration: it is only a
-# few lines in `extract_spikes()`, no different from the rest. You apply the
-# preprocessing once, upstream, then reuse the standardized result everywhere.
+# few lines in `extract_spikes()`, no different from the rest.
 # :::
 #
 
@@ -774,12 +773,10 @@ print(
 # # Why this matters for neuro foundation models
 #
 # - **Fast, minimal reads.** Each training step loads only the variables and the
-#   short time window the model needs, so a step touches megabytes, not gigabytes,
-#   no matter how large the underlying session is.
-# - **Store more at no model cost.** The file can keep everything (all units, every
-#   behavioral signal, raw QC fields, alternative labels) for future benchmarking
-#   or new tasks. Unused fields cost disk space, not RAM or training time, because
-#   they are simply never read.
+#   short time window the model needs.
+# - **Store more at no model cost.** The file can keep everything (every behavioral
+#   signal, alternative labels) for future benchmarking or new tasks. Unused fields
+#   cost disk space, not RAM or training time, because they are never read.
 # - **Defer processing to the slice.** Since each window is tiny, per-sample steps
 #   (binning, normalization, adding noise) are cheap to compute on the fly. You can
 #   reparametrize them, or try variants, without ever reprocessing the file on disk.
