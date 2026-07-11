@@ -770,7 +770,7 @@ print(
 
 # %% [markdown]
 # ::: {.callout-tip}
-# # Why this matters for neuro foundation models
+# # Why lazy loading matters for neuro foundation models
 #
 # - **Fast, minimal reads.** Each training step loads only the variables and the
 #   short time window the model needs.
