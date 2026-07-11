@@ -184,14 +184,15 @@ print(f"Using device: {device}")
 # %% [markdown]
 # # A First Look at the Data
 #
-# Before building the dataset, let's see what a `brainsets` recording actually
-# *is*. Each session is a single, lazily-loaded object that holds every modality
-# on one shared time axis: the spikes of all recorded neurons, plus behavioral
-# covariates (wheel, whisker, paws) and the trial structure.
+# Before we build a dataset from the processed session to train a model, let's see
+# what a `brainsets` recording actually *is*. Each session is a single,
+# lazily-loaded object that holds every modality on one shared time axis: the spikes
+# of all recorded neurons, plus behavioral covariates (wheel, whisker, paws) and the
+# trial structure.
 #
 
 # %% [markdown]
-# We start by opening a single session with the base `Dataset` and printing it.
+# We start by opening a single session with the base torch_brain `Dataset` and printing it.
 # What comes back is one object: some scalar metadata, plus a nested tree of typed
 # containers that hold every modality on a shared clock. The full print is
 # verbose, so it is tucked into a collapsible panel below; expand it to see the
