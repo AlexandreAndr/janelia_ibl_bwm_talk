@@ -1185,15 +1185,13 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 # %% [markdown]
 # ## Visualizing the split, a sample, and how sampling works
 #
-# `{split}_domain` is one contiguous block per split (train early, val in the
-# middle, test late), covering the whole session. The blocks are contiguous and
-# time-ordered on purpose: neighboring windows in a neural recording are
-# autocorrelated, so a shuffled split would scatter test windows right next to
-# train windows and leak that shared temporal structure into the score. Keeping
-# each split to a single block, with test strictly after train, removes that
-# leakage and turns evaluation into a harder, more honest question: does the
-# model still hold up on a later stretch of the session it never saw? (That gap
-# is the point of the causal split; see Final Test Evaluation.)
+# - **`{split}_domain` is one contiguous, time-ordered block per split** (train
+#   early, val middle, test late), together covering the whole session.
+# - **Blocks are contiguous on purpose:** neighboring windows in a neural
+#   recording are autocorrelated, so a shuffled split would place test windows
+#   next to train windows and leak that shared temporal structure. Keeping each
+#   split to one block removes the leakage and asks the harder question: does the
+#   model hold up on a later stretch it never saw?
 #
 # But `TrialSampler` never samples from that block directly: `get_sampling_intervals` first intersects
 # it with `movement_intervals` (only movement periods count as samples) and
@@ -1405,6 +1403,9 @@ show(
 
 # %% [markdown]
 # # The Model
+#
+# Now that each sample is an `(X, y)` pair, we can build a deep learning model
+# from standard PyTorch building blocks. Nothing here is TorchBrain-specific.
 #
 # Three small decoders are defined in the cells below: Linear, GRU, and TCN.
 #
