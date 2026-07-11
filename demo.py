@@ -806,13 +806,25 @@ print(
 # PyTorch handles this with a standard pattern, and TorchBrain builds on it with
 # three cooperating pieces, each owning one of the questions above:
 #
-# - **Dataset** tells the sampler *where* sampling is allowed (via
-#   `get_sampling_intervals`), and turns a chosen window into an `(X, y)`
-#   sample (via `__getitem__`).
+# ::: {.callout-note}
+# # Three building blocks for getting data to the model
+#
+# - **Dataset** defines, first, *what* a sample is: given a time window, it
+#   turns it into an `(X, y)` sample (via `__getitem__`). And second, *where*
+#   sampling is allowed, which it advertises to the sampler (via
+#   `get_sampling_intervals`).
 # - **Sampler** decides *what* samples to load, and in what order, by
 #   emitting `DatasetIndex` objects.
 # - **DataLoader** fetches the chosen samples and collates them into a batch,
 #   as usual in PyTorch.
+# :::
+#
+# The Sampler and Dataset play a little back-and-forth to produce each batch:
+#
+# ![The Sampler and Dataset handshake: (1) the Dataset advertises where sampling
+# is allowed, (2) the Sampler picks windows and emits them as `DatasetIndex`
+# objects, (3) the Dataset slices those windows into `(X, y)`
+# samples.](img/overview.png){#fig-pipeline width=90%}
 
 # %% [markdown]
 # ## Defining a custom Dataset
@@ -824,10 +836,12 @@ print(
 # - **`get_sampling_intervals`**: decides *which* time windows count as
 #   samples. For wheel-speed decoding, each sample is a fixed **1.0 s** window
 #   drawn from the trials of the IBL decision-making task, restricted to the
-#   movement window and to the times where the wheel signal is defined. We use
-#   the dataset's built-in **causal** train/val/test split (`{split}_domain`):
-#   train is early in the session, val is in the middle, and test is late
-#   (more on the actual split proportions below).
+#   movement window and to the times where the wheel signal is defined. Which
+#   windows it returns depends on the split the dataset was built for: we use
+#   the dataset's built-in **causal** train/val/test split (`{split}_domain`),
+#   so the same method hands back a different set of intervals for the train,
+#   val, and test datasets. Train is early in the session, val is in the middle,
+#   and test is late (more on the actual split proportions below).
 # - **`__getitem__`**: given a time window, turns it into an `(X, y)` sample:
 #   `X` is the model input, a binned spike raster; `y` is the model target,
 #   the wheel speed.
