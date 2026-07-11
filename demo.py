@@ -786,8 +786,25 @@ print(
 # %% [markdown]
 # # Dataset, Sampler, and DataLoader
 #
-# TorchBrain's data pipeline for training is built from three cooperating
-# pieces:
+# Now that we have looked at the recording, we can build the components that
+# extract data from it and feed the model for training and evaluation.
+#
+# Take a step back on what this requires. In a supervised learning setting, the
+# model learns from examples, each a pair of an input `X` (here, the neural
+# activity) and a target `y` (the behavior we want to predict, the wheel speed).
+# Starting from a continuous recording, we need to:
+#
+# - **carve the recording into individual `(X, y)` samples**, one per short time
+#   window;
+# - **split those samples into training, validation, and test sets**, so we fit
+#   the model on one part of the session, tune on a second part, and measure
+#   generalization on a third, unseen part;
+# - **move the data efficiently from disk to the GPU**, reading only the small
+#   slices each step needs, grouping them into batches, and overlapping loading
+#   with computation so the GPU stays busy.
+#
+# PyTorch handles this with a standard pattern, and TorchBrain builds on it with
+# three cooperating pieces, each owning one of the questions above:
 #
 # - **Dataset** tells the sampler *where* sampling is allowed (via
 #   `get_sampling_intervals`), and turns a chosen window into an `(X, y)`
