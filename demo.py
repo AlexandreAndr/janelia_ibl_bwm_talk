@@ -1208,10 +1208,10 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 # about **21%/11%/67% of the session's raw time**. Pan or zoom either row
 # (they are linked) to see this for yourself.
 #
-# `train_sampler` was built with `shuffle=True`, so every epoch
-# `TrialSampler.__iter__` draws a fresh `torch.randperm` and yields those
-# windows in a new random order; `val_sampler`/`test_sampler` stay in the
-# fixed order `sampling_intervals` was built in, for reproducible evaluation.
+# `train_sampler` was built with `shuffle=True`, so every epoch yields those
+# windows in a new random order; `val_sampler`/`test_sampler` stay in the fixed
+# order `sampling_intervals` was built in, for reproducible evaluation.
+#
 # The three sliders below freeze one such epoch order per split (train, val,
 # test): step through any of them to see the corresponding window highlighted,
 # in that split's color, on the row above, and the `(X, Y)` pair, binned spikes
