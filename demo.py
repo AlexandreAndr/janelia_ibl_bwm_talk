@@ -73,11 +73,12 @@
 # never written to disk.
 #
 # ::: {.callout-tip title="Bring your own preprocessing"}
-# The pipeline is just plain Python, so this quality filter is only a few lines
-# in `extract_spikes()`, no different from any other step. You can wrap an
-# existing dataset and apply whatever preprocessing you want, quality filtering,
-# rescaling, custom features, in the same flexible way, then reuse the result
-# everywhere.
+# A `brainsets` pipeline is just plain Python, so any preprocessing you want,
+# quality filtering, rescaling, custom features, unit selection, is ordinary
+# code you drop into the pipeline alongside every other step, with no special
+# API to learn. The good-units filter above is one illustration: it is only a
+# few lines in `extract_spikes()`, no different from the rest. You apply the
+# preprocessing once, upstream, then reuse the standardized result everywhere.
 # :::
 #
 
@@ -675,9 +676,11 @@ _ = gc.collect()
 # ## Lazy loading: pay only for what you touch
 #
 # This session is **~0.43 GB** on disk. Reading all of it into memory at once is
-# both possible and a bad idea: `materialize()` pulls every array into RAM, and
-# the footprint below would then be paid again for every session a
-# foundation model trains on.
+# both possible and, at scale, a bad idea: `materialize()` pulls every array
+# into RAM, and the footprint below would then be paid again for every session.
+# For one session that is fine, but a foundation model trains on hundreds or
+# thousands of them, often much larger, and loading them all eagerly stops
+# fitting in memory long before you get there.
 
 # %%
 import time
