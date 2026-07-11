@@ -1561,7 +1561,7 @@ print(model)
 # %% [markdown]
 # ## Training
 #
-# A standard PyTorch loop! MSE loss against the wheel speed, AdamW optimizer,
+# A standard PyTorch loop: MSE loss against the wheel speed, AdamW optimizer,
 # R² score on the validation set at the end of each epoch.
 
 # %%
@@ -1645,7 +1645,7 @@ plt.show()
 # The **test** split is the *late* portion of the session (the causal split), held
 # out from training and model selection. We score it exactly **once**, here, to get
 # an honest estimate of decoding performance. Because the split is temporal rather
-# than shuffled, test R² is typically **lower** than validation R² -- that gap
+# than shuffled, test R² is typically **lower** than validation R², and that gap
 # reflects within-session nonstationarity, which is exactly what a causal split is
 # designed to expose.
 
