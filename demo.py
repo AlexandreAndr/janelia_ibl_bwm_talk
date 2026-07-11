@@ -44,8 +44,8 @@
 # Neuroscience datasets are usually distributed through a lab- or
 # consortium-specific API, here the IBL's own **ONE API**. `brainsets` is a
 # pipeline that wraps around that native access pattern: it downloads the raw
-# session and converts it into the standardized HDF5 format that `torch-brain`
-# datasets expect. The pipeline used for a given dataset can be one shared by
+# session and converts it into the standardized HDF5 format to be compatible
+# with `torch-brain`. The pipeline used for a given dataset can be one shared by
 # [the community](https://github.com/neuro-galaxy/torch_brain/tree/main/torch_brain/pipeline/brainsets-pipelines),
 # or your own local, private one, kept outside that shared collection because
 # it's just an example, processes a private dataset, applies custom
@@ -54,27 +54,31 @@
 # This tutorial's own pipeline,
 # [`ibl_brain_wide_map_2025`](https://github.com/AlexandreAndr/janelia_ibl_bwm_talk/tree/main/ibl_brain_wide_map_2025),
 # falls in that latter category: a plain-Python `brainsets` pipeline kept
-# alongside this notebook as a worked example of the real flow, for anyone
+# alongside this notebook as an example of the real flow, for anyone
 # curious how a raw IBL session gets turned into the standardized HDF5 format.
 # Running it downloads/processes ~5.5 GB of
 # raw data into a ~0.4 GB HDF5 file (already filtered to good-quality units,
 # see "Good units only" below). For this tutorial we skip that step: the
 # cells below instead fetch the single, already-processed session straight
 # from the Hugging Face Hub (public, no login required), so you can get
-# started in seconds. See this folder's `README.md` for more details.
+# started in seconds. See [this folder's `README.md`](README.md) for more details.
 #
 # **Good units only.** The raw session recorded 1547 units, but many are noise
-# clusters, low-firing, or sit on a probe that failed QC. Rather than filtering
-# them out here at read-time, this tutorial's `brainsets` pipeline
+# clusters, barely fire, or sit on a probe that failed quality control. This
+# tutorial's pipeline
 # ([`ibl_brain_wide_map_2025/pipeline.py`](ibl_brain_wide_map_2025/pipeline.py))
-# does it once, upstream, via three `--unit-filter` flags passed to
-# `brainsets prepare`: `probe_qc` (`qc_neural == PASS`), `firing_rate`
-# (`firing_rate > 1 Hz`), and `unit_qc` (KiloSort/IBL's own `label == 1.0`,
-# "good"). Because the pipeline is just plain Python, adding this custom
-# quality logic is a few lines in `extract_spikes()`, no different from any
-# other preprocessing step. The processed `.h5` this notebook loads was built
-# with all three flags, so it already ships with only the **358 good-quality
-# units**; the discarded units' spikes were never written to disk at all.
+# drops them once, upstream, keeping only units that pass probe QC, fire above
+# 1 Hz, and carry KiloSort/IBL's own "good" label. So the `.h5` this notebook
+# loads already ships with just the **358 good-quality units**; the rest were
+# never written to disk.
+#
+# ::: {.callout-tip title="Bring your own preprocessing"}
+# The pipeline is just plain Python, so this quality filter is only a few lines
+# in `extract_spikes()`, no different from any other step. You can wrap an
+# existing dataset and apply whatever preprocessing you want, quality filtering,
+# rescaling, custom features, in the same flexible way, then reuse the result
+# everywhere.
+# :::
 #
 
 # %% [markdown]
