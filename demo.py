@@ -824,7 +824,7 @@ print(
 # ![The Sampler and Dataset handshake: (1) the Dataset advertises where sampling
 # is allowed, (2) the Sampler picks windows and emits them as `DatasetIndex`
 # objects, (3) the Dataset slices those windows into `(X, y)`
-# samples.](img/overview.png){#fig-pipeline width=90%}
+# samples.](img/sampler_dataset_handshake.png){#fig-sampler-dataset width=90%}
 
 # %% [markdown]
 # ## Defining a custom Dataset
@@ -916,7 +916,8 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 # The `Dataset` decides *where* sampling is allowed (`get_sampling_intervals`)
 # and how a window becomes `(X, y)` (`__getitem__`). It says nothing about *what
 # counts as one window* or *in what order* windows are drawn: that is the
-# sampler's job, and TorchBrain ships several in `torch_brain.samplers`. Below we
+# sampler's job, and TorchBrain ships several in
+# [`torch_brain.samplers`](https://github.com/neuro-galaxy/torch_brain/tree/main/torch_brain/samplers). Below we
 # build the two most common, hand each the very same `Dataset`, and contrast
 # them:
 #
@@ -927,9 +928,8 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 # - **`RandomFixedWindowSampler`** ignores trial structure. Given a broad,
 #   continuous interval (here the whole training block) and a `window_length`, it
 #   carves as many fixed-length windows as fit, each at a fresh **random offset**,
-#   and re-draws those offsets every epoch. This is the self-supervised /
-#   pretraining paradigm: sample the recording *everywhere*, not just at task
-#   events.
+#   and re-draws those offsets every epoch. We do not use it here, but it would
+#   have been a simpler alternative.
 #
 # The real difference is *who sets the window boundaries*: with `TrialSampler`
 # the **Dataset** does, upstream in `get_sampling_intervals`; with
@@ -962,15 +962,12 @@ random_sampler = RandomFixedWindowSampler(
     generator=torch.Generator().manual_seed(3),
 )
 
-session_s = float(demo_rec.domain.end[-1])
 block_s = float(
     np.sum(
         np.asarray(broad_intervals[RECORDING_ID].end)
         - np.asarray(broad_intervals[RECORDING_ID].start)
     )
 )
-trial_cov_s = len(trial_sampler) * 1.0  # each movement window is 1.0 s
-rand_cov_s = len(random_sampler) * random_sampler.window_length
 print(
     f"TrialSampler:             {len(trial_sampler):4d} windows / epoch  "
     f"(one per trial, at movement onsets)"
@@ -978,16 +975,6 @@ print(
 print(
     f"RandomFixedWindowSampler: {len(random_sampler):4d} windows / epoch  "
     f"(tiling the {block_s:.0f}s training block)"
-)
-print()
-print(f"session length: {session_s:.0f}s")
-print(
-    f"  trial windows  cover {trial_cov_s:6.0f}s = "
-    f"{100 * trial_cov_s / session_s:4.1f}% of the session"
-)
-print(
-    f"  random windows cover {rand_cov_s:6.0f}s = "
-    f"{100 * rand_cov_s / session_s:4.1f}% of the session"
 )
 
 # %% [markdown]
