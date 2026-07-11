@@ -23,6 +23,10 @@ BUILD=.build
 rm -rf "$BUILD" _site
 mkdir -p "$BUILD"
 cp "$NB" _quarto.yml "$BUILD/"
+# Figures reference external images (e.g. img/…png) resolved relative to the
+# notebook; embed-resources inlines them at render time, so they must exist in
+# the isolated build dir too.
+cp -r img "$BUILD/"
 
 if [[ "${1:-}" == "--preview" ]]; then
   # Serve from the isolated dir. Output-dir is _site (relative to $BUILD).

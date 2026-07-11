@@ -928,8 +928,7 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 # - **`RandomFixedWindowSampler`** ignores trial structure. Given a broad,
 #   continuous interval (here the whole training block) and a `window_length`, it
 #   carves as many fixed-length windows as fit, each at a fresh **random offset**,
-#   and re-draws those offsets every epoch. We do not use it here, but it would
-#   have been a simpler alternative.
+#   and re-draws those offsets every epoch.
 #
 # The real difference is *who sets the window boundaries*: with `TrialSampler`
 # the **Dataset** does, upstream in `get_sampling_intervals`; with
@@ -1114,8 +1113,8 @@ display(
 # sample is one clean, behavior-aligned trial. The training pipeline below
 # therefore wraps each split in a `TrialSampler`. `RandomFixedWindowSampler`
 # earns its place when you want to model the whole recording rather than isolated
-# events, for example self-supervised pretraining of a foundation model, which is
-# the direction the appendix points toward.
+# events, or when your events have variable lengths and do not fit a single
+# fixed-size, trial-aligned window.
 
 # %% [markdown]
 # ## Building the train, validation, and test pipeline
@@ -1164,13 +1163,8 @@ print(f"Number of units: {train_ds.num_units}")
 print(f"Number of training samples: {len(train_sampler)}")
 print(f"Number of validation samples: {len(val_sampler)}")
 print(f"Number of test samples: {len(test_sampler)}")
-print(f"Number of units:  {train_ds.num_units}")
 print(f"Bins per sample:  {train_ds.num_bins}  (bin size = {BIN_SIZE}s)")
 print(f"Target samples:   {train_ds.out_samples}  (at {train_ds.out_sampling_rate} Hz)")
-print(
-    f"Train trials:     {len(train_ds.get_sampling_intervals()[train_ds.recording_id])}"
-)
-print(f"Val trials:       {len(val_ds.get_sampling_intervals()[val_ds.recording_id])}")
 
 # %% [markdown]
 # Let's first peek at a single sample to confirm the shapes match what we expect.
@@ -1192,8 +1186,16 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 # ## Visualizing the split, a sample, and how sampling works
 #
 # `{split}_domain` is one contiguous block per split (train early, val in the
-# middle, test late), covering the whole session. But `TrialSampler` never
-# samples from that block directly: `get_sampling_intervals` first intersects
+# middle, test late), covering the whole session. The blocks are contiguous and
+# time-ordered on purpose: neighboring windows in a neural recording are
+# autocorrelated, so a shuffled split would scatter test windows right next to
+# train windows and leak that shared temporal structure into the score. Keeping
+# each split to a single block, with test strictly after train, removes that
+# leakage and turns evaluation into a harder, more honest question: does the
+# model still hold up on a later stretch of the session it never saw? (That gap
+# is the point of the causal split; see Final Test Evaluation.)
+#
+# But `TrialSampler` never samples from that block directly: `get_sampling_intervals` first intersects
 # it with `movement_intervals` (only movement periods count as samples) and
 # with `wheel._domain` (only where the target signal is defined). The first
 # two rows below make that concrete: the domain blocks, and directly beneath
