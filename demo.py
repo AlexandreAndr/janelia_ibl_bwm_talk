@@ -233,20 +233,17 @@ display(
 # enough to navigate any `brainsets` session:
 #
 # - **`Data`** is the container: it nests other objects plus scalar metadata. The
-#   recording itself is a `Data`, and so are `session`, `subject`, `brainset`, and
-#   `task_aligned_intervals`.
-# - **`RegularTimeSeries`** is a signal on a fixed sampling grid (one rate, no
-#   per-sample timestamps needed). Here: `wheel`, `whisker`, and `paws`, all at
-#   50 Hz.
+#   recording itself is a `Data`, and so are `session` and `subject`.
+# - **`RegularTimeSeries`** is a signal on a fixed sampling grid. Here all
+#   behavior signals are sampled at 50 Hz.
 # - **`IrregularTimeSeries`** is a stream of events, each carrying its own
 #   timestamp. Here: `spikes`, ~12.5 M spike times tagged with a `unit_index`.
 # - **`Interval`** is a set of labelled time segments, one `start` and `end` per
-#   row. Here: `trials` (424 of them), `movement_intervals`, and the `train`,
+#   row. Here: `trials`, `movement_intervals`, and the `train`,
 #   `val`, and `test_domain` splits.
 # - **`ArrayDict`** is a table of per-item arrays sharing one axis. Here: `units`
-#   (358 neurons, already filtered to good quality, each with an `id`, a 3D
-#   `(x, y, z)` coordinate, a `region_cosmos` brain area, a `firing_rate`, and
-#   more) and `probes`.
+#   (each with an `id`, a 3D `(x, y, z)` coordinate, a `region_cosmos` brain
+#   area, a `firing_rate`, and more).
 #
 # One detail to carry into the next section: every array above printed as a
 # `Lazy...` type. Nothing has been read from disk yet; the recording is still just
