@@ -5,6 +5,15 @@
 #
 # [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AlexandreAndr/janelia_ibl_bwm_talk/blob/main/demo.ipynb)
 #
+
+# %% [markdown]
+# ::: {.content-hidden when-format="html"}
+# > ⚠️ **Running on Google Colab?** Switch to a GPU runtime before you start:
+# > **Runtime → Change runtime type → T4 GPU**. Training on CPU works but is
+# > much slower.
+# :::
+
+# %% [markdown]
 # This tutorial walks you through a minimal training pipeline for **decoding
 # behavior** from spiking activity recorded in the **mouse brain with
 # Neuropixels probes**, using a single session of the IBL Brain-Wide Map. Each
@@ -162,8 +171,7 @@ if not os.path.exists(_session_path):
     )
 
 # %% [markdown]
-# Imports, plus the training hyperparameters used throughout this
-# tutorial.
+# Imports used throughout this tutorial.
 
 # %%
 #| code-fold: show
@@ -172,14 +180,6 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 from tqdm.auto import tqdm
-
-# Hyperparameters (feel free to play with these)
-BIN_SIZE = 0.05  # seconds -> 20 spike bins over the 1.0 s context window
-BATCH_SIZE = 64
-EPOCHS = 100
-LR = 3e-3
-SEED = 0  # for a reproducible score
-NUM_WORKERS = 2  # DataLoader workers (Colab has ~2 vCPUs); 0 = main process
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -829,6 +829,20 @@ print(
 # is allowed, (2) the Sampler picks windows and emits them as `DatasetIndex`
 # objects, (3) the Dataset slices those windows into `(X, y)`
 # samples.](img/sampler_dataset_handshake.png){#fig-sampler-dataset width=90%}
+
+# %% [markdown]
+# Before building the pipeline, here are the hyperparameters used throughout the
+# rest of the tutorial, gathered in one place. Feel free to play with these.
+
+# %%
+#| code-fold: show
+# Hyperparameters (feel free to play with these)
+BIN_SIZE = 0.05  # seconds -> 20 spike bins over the 1.0 s context window
+BATCH_SIZE = 64
+EPOCHS = 100
+LR = 3e-3
+SEED = 0  # for a reproducible score
+NUM_WORKERS = 2  # DataLoader workers (Colab has ~2 vCPUs); 0 = main process
 
 # %% [markdown]
 # ## Defining a custom Dataset
