@@ -14,8 +14,9 @@
 #
 # <!-- TODO: check how many Neuropixels probes were inserted for this session -->
 #
-# As a concrete, end-to-end example we decode **wheel speed** (a 1D continuous
-# signal sampled at 50 Hz). Treat it as an interactive starting point: the
+# As a concrete, end-to-end example we decode **whisker motion energy** (a 1D
+# continuous signal sampled at 50 Hz). Treat it as an interactive starting
+# point: the
 # **Hands On** section lets you swap in another behavioral covariate as the
 # decoding target, and can be extended further using the composable transforms
 # shown in the appendix.
@@ -154,7 +155,7 @@ if not os.path.exists(_session_path):
 
     os.makedirs(os.path.dirname(_session_path), exist_ok=True)
     hf_hub_download(
-        repo_id="AlexAndreUpenn/ibl-bwm-wheel-speed-demo",
+        repo_id="AlexAndreUpenn/neuro-data-re-hack-ibl-torch-brain-demo",
         repo_type="dataset",
         filename=f"{RECORDING_ID}.h5",
         local_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
@@ -754,18 +755,18 @@ print(
     f"    -> {dt_materialize / dt_slice:6.0f}x less time than materializing the whole session"
 )
 
-# (ii) Access a single attribute (wheel speed) for the whole session: every
-#      time point is read, but only for that one modality, not the others.
+# (ii) Access a single attribute (whisker motion energy) for the whole session:
+#      every time point is read, but only for that one modality, not the others.
 lazy_rec = BaseDataset(
     dataset_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
     recording_ids=[RECORDING_ID],
 ).get_recording(RECORDING_ID)
 
 t = time.time()
-wheel_speed = np.asarray(lazy_rec.wheel.speed)
+whisker_me = np.asarray(lazy_rec.whisker.motion_energy)
 dt_attr = time.time() - t
 print(
-    f"(ii) load wheel.speed only, whole session:  {dt_attr * 1e3:6.2f} ms\n"
+    f"(ii) load whisker.motion_energy only, whole session:  {dt_attr * 1e3:6.2f} ms\n"
     f"    -> {dt_materialize / dt_attr:6.0f}x less time than materializing the whole session"
 )
 
@@ -791,7 +792,8 @@ print(
 #
 # Take a step back on what this requires. In a supervised learning setting, the
 # model learns from examples, each a pair of an input `X` (here, the neural
-# activity) and a target `y` (the behavior we want to predict, the wheel speed).
+# activity) and a target `y` (the behavior we want to predict, the whisker
+# motion energy).
 # Starting from a continuous recording, we need to:
 #
 # - **carve the recording into individual `(X, y)` samples**, one per short time
@@ -831,12 +833,12 @@ print(
 #
 # In TorchBrain we define a custom `Dataset`; `IBLBrainWideMap2025` below is a
 # simple example, for a single recording. Two methods matter for the
-# wheel-speed task:
+# whisker-motion-energy task:
 #
 # - **`get_sampling_intervals`**: decides *which* time windows count as
-#   samples. For wheel-speed decoding, each sample is a fixed **1.0 s** window
-#   drawn from the trials of the IBL decision-making task, restricted to the
-#   movement window and to the times where the wheel signal is defined. Which
+#   samples. For whisker-motion-energy decoding, each sample is a fixed **1.0 s**
+#   window drawn from the trials of the IBL decision-making task, restricted to
+#   the movement window and to the times where the whisker signal is defined. Which
 #   windows it returns depends on the split the dataset was built for: we use
 #   the dataset's built-in **causal** train/val/test split (`{split}_domain`),
 #   so the same method hands back a different set of intervals for the train,
@@ -844,7 +846,7 @@ print(
 #   and test is late (more on the actual split proportions below).
 # - **`__getitem__`**: given a time window, turns it into an `(X, y)` sample:
 #   `X` is the model input, a binned spike raster; `y` is the model target,
-#   the wheel speed.
+#   the whisker motion energy.
 #
 # %%
 #| code-fold: show
@@ -856,7 +858,7 @@ from torch_brain.utils import bin_spikes
 
 
 class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
-    # wheel speed is a 1D continuous signal, regularly sampled at BEHAVIOR_SFREQ (50 Hz).
+    # whisker motion energy is a 1D continuous signal, regularly sampled at BEHAVIOR_SFREQ (50 Hz).
     out_dim = 1
     spiking_dataset_mixin_uniquify_unit_ids = True
     CONTEXT_WINDOW = 1.0  # seconds
@@ -891,7 +893,7 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
 
         intervals = recording.task_aligned_intervals.movement_intervals
         intervals = intervals & getattr(recording, f"{self.split}_domain")
-        intervals = intervals & recording.wheel._domain
+        intervals = intervals & recording.whisker._domain
         return {self.recording_id: intervals}
 
     # `index` is a DatasetIndex(recording_id, start, end) produced by the sampler.
@@ -904,7 +906,7 @@ class IBLBrainWideMap2025(SpikingDatasetMixin, Dataset):
         X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
         X = torch.from_numpy(X).float()
 
-        Y = np.asarray(data.wheel.speed, dtype=np.float32)  # shape: (out_samples,)
+        Y = np.asarray(data.whisker.motion_energy, dtype=np.float32)  # shape: (out_samples,)
         Y = torch.from_numpy(Y).unsqueeze(-1)
 
         return X, Y
@@ -954,7 +956,7 @@ trial_sampler = TrialSampler(sampling_intervals=trial_intervals, shuffle=True)
 # (2) Random fixed windows: carve CONTEXT_WINDOW-long windows at random offsets
 #     from the *continuous* training block, re-jittered every epoch. We seed the
 #     RNG only so this notebook renders the same picture every time.
-broad_intervals = {RECORDING_ID: demo_rec.train_domain & demo_rec.wheel._domain}
+broad_intervals = {RECORDING_ID: demo_rec.train_domain & demo_rec.whisker._domain}
 random_sampler = RandomFixedWindowSampler(
     sampling_intervals=broad_intervals,
     window_length=IBLBrainWideMap2025.CONTEXT_WINDOW,  # 1.0 s
@@ -978,10 +980,11 @@ print(
 
 # %% [markdown]
 # The animation below makes the contrast concrete. Both panels show the same
-# ~40 s stretch of wheel speed (gray); on top of it, each panel shades the 1.0 s
-# windows its sampler draws on that iteration. Stepping through five iterations,
-# the `TrialSampler` windows stay put, pinned to the movement onsets where the
-# wheel speed lifts off, while the `RandomFixedWindowSampler` windows re-jitter to
+# ~40 s stretch of whisker motion energy (gray); on top of it, each panel shades
+# the 1.0 s windows its sampler draws on that iteration. Stepping through five
+# iterations, the `TrialSampler` windows stay put, pinned to the movement onsets
+# where the whisker motion energy lifts off, while the
+# `RandomFixedWindowSampler` windows re-jitter to
 # fresh offsets each time. That per-iteration jitter is the free data augmentation
 # that also lets the random sampler tile the whole training block over many epochs.
 
@@ -1006,10 +1009,10 @@ def _window_bounds(sampler):
     return starts[order], ends[order]
 
 
-# Wheel-speed context, read once at full resolution. We mask by absolute time
-# rather than slice(), because slice() re-bases timestamps to 0.
-wheel_ts = np.asarray(demo_rec.wheel.timestamps)
-wheel_sp = np.asarray(demo_rec.wheel.speed)
+# Whisker-motion-energy context, read once at full resolution. We mask by absolute
+# time rather than slice(), because slice() re-bases timestamps to 0.
+whisk_ts = np.asarray(demo_rec.whisker.timestamps)
+whisk_me = np.asarray(demo_rec.whisker.motion_energy)
 
 tb_start = float(np.asarray(demo_rec.train_domain.start)[0])
 tb_end = float(np.asarray(demo_rec.train_domain.end)[-1])
@@ -1020,9 +1023,9 @@ anchor = float(np.sort(trial_starts)[len(trial_starts) // 3])
 z0 = max(tb_start, anchor - 3.0)
 z1 = min(tb_end, z0 + 40.0)
 
-# Wheel speed over the zoom window, thinned for a light background trace.
-m = (wheel_ts >= z0) & (wheel_ts <= z1)
-w_ts, w_sp = wheel_ts[m], wheel_sp[m]
+# Whisker motion energy over the zoom window, thinned for a light background trace.
+m = (whisk_ts >= z0) & (whisk_ts <= z1)
+w_ts, w_sp = whisk_ts[m], whisk_me[m]
 step = max(1, len(w_ts) // 3000)
 w_ts, w_sp = w_ts[::step], w_sp[::step]
 
@@ -1070,7 +1073,7 @@ def _render(k):
         ax.clear()
         ax.plot(w_ts, w_sp, color=GRAY, lw=1.0)
         ax.set_xlim(z0, z1)
-        ax.set_ylabel("wheel speed")
+        ax.set_ylabel("whisker ME")
         ax.set_yticks([])
 
     ts_starts, ts_ends = trial_epochs[k]
@@ -1108,8 +1111,8 @@ display(
 )
 
 # %% [markdown]
-# For this tutorial we decode a **task-defined event**, the 1.0 s of wheel motion
-# right after each movement onset, so `TrialSampler` is the natural choice: every
+# For this tutorial we decode a **task-defined event**, the 1.0 s of whisker
+# motion energy right after each movement onset, so `TrialSampler` is the natural choice: every
 # sample is one clean, behavior-aligned trial. The training pipeline below
 # therefore wraps each split in a `TrialSampler`. `RandomFixedWindowSampler`
 # earns its place when you want to model the whole recording rather than isolated
@@ -1195,7 +1198,7 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 #
 # But `TrialSampler` never samples from that block directly: `get_sampling_intervals` first intersects
 # it with `movement_intervals` (only movement periods count as samples) and
-# with `wheel._domain` (only where the target signal is defined). The first
+# with `whisker._domain` (only where the target signal is defined). The first
 # two rows below make that concrete: the domain blocks, and directly beneath
 # them, the much sparser set of movement windows each split actually draws
 # samples from.
@@ -1213,7 +1216,7 @@ print(f"Y shape: {tuple(Y.shape)}  (out_samples, out_dim)")
 # The three sliders below freeze one such epoch order per split (train, val,
 # test): step through any of them to see the corresponding window highlighted,
 # in that split's color, on the row above, and the `(X, Y)` pair, binned spikes
-# and wheel speed, it turns into.
+# and whisker motion energy, it turns into.
 
 # %%
 #| echo: false
@@ -1275,7 +1278,7 @@ SPLITS = [
 ]
 
 # CONTEXT_WINDOW / out_samples are identical across splits, so the target-time
-# axis for the wheel (Y) line is shared.
+# axis for the whisker motion energy (Y) line is shared.
 t_local = np.linspace(0.0, train_ds.CONTEXT_WINDOW, train_ds.out_samples).tolist()
 
 col_w = W // 3  # three columns share the width of the strips above
@@ -1337,21 +1340,21 @@ for name, ds, sampler, color, row_i in SPLITS:
     p_raster.xaxis.visible = False
     p_raster.grid.grid_line_color = None
 
-    # Y: wheel speed.
-    wheel_source = ColumnDataSource(data=dict(x=t_local, y=Ys[0]))
-    p_wheel = figure(
+    # Y: whisker motion energy.
+    whisk_source = ColumnDataSource(data=dict(x=t_local, y=Ys[0]))
+    p_whisk = figure(
         width=col_w,
         height=180,
-        title=f"{name}: wheel speed (Y)",
+        title=f"{name}: whisker motion energy (Y)",
         x_axis_label="Time within window (s)",
-        y_axis_label="Wheel speed",
+        y_axis_label="Whisker motion energy",
         toolbar_location=None,
     )
-    p_wheel.line("x", "y", source=wheel_source, line_width=2, color="black")
-    p_wheel.yaxis.visible = False
-    p_wheel.grid.grid_line_color = None
+    p_whisk.line("x", "y", source=whisk_source, line_width=2, color="black")
+    p_whisk.yaxis.visible = False
+    p_whisk.grid.grid_line_color = None
     # Sparse, round x ticks (0, 0.2, 0.4, ... up to the context window).
-    p_wheel.xaxis.ticker = FixedTicker(
+    p_whisk.xaxis.ticker = FixedTicker(
         ticks=list(np.round(np.arange(0.0, ds.CONTEXT_WINDOW + 1e-9, 0.2), 2))
     )
 
@@ -1370,7 +1373,7 @@ for name, ds, sampler, color, row_i in SPLITS:
             args=dict(
                 slider=slider,
                 raster_source=raster_source,
-                wheel_source=wheel_source,
+                whisk_source=whisk_source,
                 highlight=highlight,
                 sample_marker=sample_marker,
                 X_list=Xs,
@@ -1382,7 +1385,7 @@ for name, ds, sampler, color, row_i in SPLITS:
             code="""
     const i = slider.value
     raster_source.data = {image: [X_list[i]]}
-    wheel_source.data = {x: t_local, y: Y_list[i]}
+    whisk_source.data = {x: t_local, y: Y_list[i]}
     highlight.left = starts[i] * 1e3
     highlight.right = ends[i] * 1e3
     sample_marker.location = (starts[i] + ends[i]) * 0.5 * 1e3
@@ -1390,7 +1393,7 @@ for name, ds, sampler, color, row_i in SPLITS:
         ),
     )
 
-    split_columns.append(column(slider, p_raster, p_wheel))
+    split_columns.append(column(slider, p_raster, p_whisk))
 
 show(
     column(
@@ -1561,7 +1564,7 @@ print(model)
 # %% [markdown]
 # ## Training
 #
-# A standard PyTorch loop: MSE loss against the wheel speed, AdamW optimizer,
+# A standard PyTorch loop: MSE loss against the whisker motion energy, AdamW optimizer,
 # R² score on the validation set at the end of each epoch.
 
 # %%
@@ -1598,8 +1601,8 @@ for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
 # %% [markdown]
 # ## Evaluation
 #
-# Plot the R² curve over training and compare predicted vs. actual wheel speed
-# on several validation trials.
+# Plot the R² curve over training and compare predicted vs. actual whisker motion
+# energy on several validation trials.
 
 # %%
 fig, ax = plt.subplots(figsize=(6, 3))
@@ -1633,9 +1636,9 @@ with torch.no_grad():
 for ax in axes[-1, :]:
     ax.set_xlabel("Time within trial (s)")
 for ax in axes[:, 0]:
-    ax.set_ylabel("Wheel speed")
+    ax.set_ylabel("Whisker motion energy")
 axes[0, 0].legend(loc="upper left")
-fig.suptitle("Predicted vs. actual wheel speed (8 validation trials)")
+fig.suptitle("Predicted vs. actual whisker motion energy (8 validation trials)")
 plt.tight_layout()
 plt.show()
 
@@ -1666,7 +1669,7 @@ print(f"Best validation R²: {best_val_r2:.3f}")
 print(f"Final test R²:      {test_r2:.3f}")
 
 # %% [markdown]
-# And the predicted vs. actual wheel speed across 8 held-out test trials:
+# And the predicted vs. actual whisker motion energy across 8 held-out test trials:
 
 # %%
 N_EXAMPLES = 8
@@ -1686,9 +1689,9 @@ with torch.no_grad():
 for ax in axes[-1, :]:
     ax.set_xlabel("Time within trial (s)")
 for ax in axes[:, 0]:
-    ax.set_ylabel("Wheel speed")
+    ax.set_ylabel("Whisker motion energy")
 axes[0, 0].legend(loc="upper left")
-fig.suptitle("Test trials: predicted vs. actual wheel speed (8 trials)")
+fig.suptitle("Test trials: predicted vs. actual whisker motion energy (8 trials)")
 plt.tight_layout()
 plt.show()
 
@@ -1701,18 +1704,18 @@ plt.show()
 # piece that changes when you decode a new signal: **what `__getitem__` returns
 # as `Y`**.
 #
-# **Goal:** instead of wheel speed, decode one of the other covariates recorded
-# in this session: `whisker.motion_energy`, `paws.left_paw_speed`, or
+# **Goal:** instead of whisker motion energy, decode one of the other covariates
+# recorded in this session: `wheel.speed`, `paws.left_paw_speed`, or
 # `paws.right_paw_speed`.
 #
 # **Steps:**
 # 1. Pick a covariate from the list above.
 # 2. Subclass `IBLBrainWideMap2025` (skeleton below) and point `Y` at your
-#    chosen covariate instead of `data.wheel.speed`.
+#    chosen covariate instead of `data.whisker.motion_energy`.
 # 3. Instantiate train/val/test datasets, samplers, and loaders for your new
 #    class, exactly as in "Creating the Datasets, Samplers, and DataLoaders".
 # 4. Re-run the training loop on a fresh model instance, and compare its
-#    validation R² to wheel speed's.
+#    validation R² to whisker motion energy's.
 #
 # This is a self-check: if your new covariate trains and its R² is in a
 # plausible range, your subclass is wired correctly. If you want to go further,
@@ -1724,7 +1727,7 @@ plt.show()
 
 # %%
 class IBLCovariateDataset(IBLBrainWideMap2025):
-    """Same as IBLBrainWideMap2025, but decodes `namespace.attr` instead of wheel speed."""
+    """Same as IBLBrainWideMap2025, but decodes `namespace.attr` instead of whisker motion energy."""
 
     def __init__(self, *args, namespace: str, attr: str, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1738,20 +1741,20 @@ class IBLCovariateDataset(IBLBrainWideMap2025):
         X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
         X = torch.from_numpy(X).float()
 
-        # TODO: read your chosen covariate instead of the wheel speed, e.g.
+        # TODO: read your chosen covariate instead of the whisker motion energy, e.g.
         # Y = np.asarray(getattr(getattr(data, self.namespace), self.attr), dtype=np.float32)
-        Y = np.asarray(data.wheel.speed, dtype=np.float32)  # <-- replace this line
+        Y = np.asarray(data.whisker.motion_energy, dtype=np.float32)  # <-- replace this line
         Y = torch.from_numpy(Y).unsqueeze(-1)
 
         return X, Y
 
 
 # TODO: pick a covariate to decode
-NAMESPACE = "whisker"  # try: "whisker", "paws"
-ATTR = "motion_energy"  # try: "motion_energy", "left_paw_speed", "right_paw_speed"
+NAMESPACE = "wheel"  # try: "wheel", "paws"
+ATTR = "speed"  # try: "speed", "left_paw_speed", "right_paw_speed"
 
 # TODO: build train/val/test IBLCovariateDataset instances (passing
 # namespace=NAMESPACE, attr=ATTR), wrap each in a TrialSampler + DataLoader
 # (same pattern as "Creating the Datasets, Samplers, and DataLoaders" above),
 # then re-run the training loop on a fresh model instance and compare its
-# validation R² to wheel speed's.
+# validation R² to whisker motion energy's.

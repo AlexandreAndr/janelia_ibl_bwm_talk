@@ -123,11 +123,11 @@
 # fig, axes = plt.subplots(1, 3, figsize=(12, 3), sharey=True)
 # for ax, L in zip(axes, [0.5, 1.0, 2.0]):
 #     s = demo_rec.slice(DEMO_T0, DEMO_T0 + L)
-#     y = np.asarray(s.wheel.speed)
+#     y = np.asarray(s.whisker.motion_energy)
 #     ax.plot(np.linspace(0, L, len(y)), y, color="#4C72B0")
 #     ax.set_title(f"{L} s -> {len(y)} target samples")
 #     ax.set_xlabel("time in window (s)")
-# axes[0].set_ylabel("wheel speed")
+# axes[0].set_ylabel("whisker motion energy")
 # fig.suptitle("Same start, three context windows: only the slice length changes")
 # plt.tight_layout()
 # plt.show()
@@ -143,19 +143,19 @@
 # # %%
 # augment = Compose([RandomCrop(0.8)])
 # base = demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0)
-# y_base = np.asarray(base.wheel.speed)
+# y_base = np.asarray(base.whisker.motion_energy)
 #
 # fig, axes = plt.subplots(1, 2, figsize=(10, 3), sharey=True)
 # axes[0].plot(np.linspace(0, 1.0, len(y_base)), y_base, color="#333333")
 # axes[0].set_title(f"raw (1.0 s, {len(y_base)} samples)")
 # for _ in range(3):
 #     a = augment(demo_rec.slice(DEMO_T0, DEMO_T0 + 1.0))
-#     y_a = np.asarray(a.wheel.speed)
+#     y_a = np.asarray(a.whisker.motion_energy)
 #     axes[1].plot(np.linspace(0, len(y_a) / 50.0, len(y_a)), y_a, alpha=0.7)
 # axes[1].set_title("RandomCrop(0.8): a fresh crop each epoch")
 # for ax in axes:
 #     ax.set_xlabel("time (s)")
-# axes[0].set_ylabel("wheel speed")
+# axes[0].set_ylabel("whisker motion energy")
 # fig.suptitle("A transform re-draws every epoch, combating overfitting for free")
 # plt.tight_layout()
 # plt.show()
@@ -166,7 +166,7 @@
 # # Units are a labelled axis, so you can drop or select them declaratively.
 # # `UnitDropout` keeps a random subset each sample (augmentation / regularizer);
 # # `UnitFilter` keeps a fixed subset, e.g. one brain region, turning "which region
-# # drives wheel decoding?" into a one-line ablation.
+# # drives whisker decoding?" into a one-line ablation.
 #
 # # %%
 # # (a) UnitDropout: a different random subset of units each call

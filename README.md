@@ -1,7 +1,7 @@
-# IBL wheel-speed minimal example (self-contained)
+# IBL whisker motion energy minimal example (self-contained)
 
-A transparent, standalone training example: decode **wheel speed** (1D, 50 Hz)
-from whole-brain spiking activity of a single IBL session, with three small
+A transparent, standalone training example: decode **whisker motion energy**
+(1D, 50 Hz) from whole-brain spiking activity of a single IBL session, with three small
 decoders (Linear, GRU, TCN). Everything it needs lives in this folder.
 
 ## Contents
@@ -50,7 +50,7 @@ checkout, manual steps, or ONE API credentials needed to just run the example.
 By default, the notebook downloads the already-processed `.h5` (~0.4 GB,
 already filtered to good-quality units) for
 `0802ced5-33a3-405e-8336-b65ebc5cb07c` straight from the
-[`AlexAndreUpenn/ibl-bwm-wheel-speed-demo`](https://huggingface.co/datasets/AlexAndreUpenn/ibl-bwm-wheel-speed-demo)
+[`AlexAndreUpenn/neuro-data-re-hack-ibl-torch-brain-demo`](https://huggingface.co/datasets/AlexAndreUpenn/neuro-data-re-hack-ibl-torch-brain-demo)
 dataset on the Hugging Face Hub, into
 `processed/ibl_brain_wide_map_2025/0802ced5-33a3-405e-8336-b65ebc5cb07c.h5`.
 This is what runs on Colab and is the fastest way to get started: it skips
