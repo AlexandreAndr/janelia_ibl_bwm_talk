@@ -7,10 +7,13 @@
 #
 
 # %% [markdown]
-# <div class="colab-only" style="border-left:4px solid #f0ad4e; background:#fcf8e3; color:#3a3a3a; padding:12px 16px; margin:8px 0; border-radius:4px;">
-# ⚠️ <b>Running on Google Colab?</b> Switch to a GPU runtime before you start:
-# <b>Runtime → Change runtime type → T4 GPU</b>. Training on CPU works but is much slower.
-# </div>
+# ::: {.content-hidden when-format="html"}
+# > ### ⚠️ Running on Google Colab?
+# >
+# > Switch to a GPU runtime before you start:
+# > **Runtime → Change runtime type → T4 GPU**. Training on CPU works but is
+# > much slower.
+# :::
 
 # %% [markdown]
 # This tutorial walks you through a minimal training pipeline for **decoding

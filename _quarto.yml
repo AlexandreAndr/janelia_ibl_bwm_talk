@@ -37,7 +37,3 @@ format:
     include-in-header:
       - text: |
           <style>html, body { height: auto !important; }</style>
-          <!-- Colab-only notices (e.g. the GPU-runtime warning) are marked
-               .colab-only so they render in the notebook but stay hidden on
-               the Quarto site. -->
-          <style>.colab-only { display: none !important; }</style>
