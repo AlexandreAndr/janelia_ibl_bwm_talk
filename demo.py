@@ -177,7 +177,7 @@ from tqdm.auto import tqdm
 BIN_SIZE = 0.05  # seconds -> 20 spike bins over the 1.0 s context window
 BATCH_SIZE = 64
 EPOCHS = 100
-LR = 1e-4
+LR = 3e-3
 SEED = 0  # for a reproducible score
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
