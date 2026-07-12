@@ -178,7 +178,7 @@ BIN_SIZE = 0.05  # seconds -> 20 spike bins over the 1.0 s context window
 BATCH_SIZE = 64
 EPOCHS = 100
 LR = 1e-4
-SEED = 0  # seed weight init, dropout, and batch order for a reproducible score
+SEED = 0  # for a reproducible score
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -1544,14 +1544,9 @@ class TCN(nn.Module):
 
 # %%
 #| code-fold: show
-# Seed right before we build the model so weight init, the dropout masks drawn
-# during training, and the shuffled batch order are all reproducible. The test
-# R2 is otherwise a fresh random draw each run. The cuDNN flags pin the GPU to
-# deterministic kernels so the printed score is identical run to run.
+# Seed weight init, dropout, and batch order so the score is reproducible.
 torch.manual_seed(SEED)
 np.random.seed(SEED)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
 
 model = TCN(  # try: Linear, GRU, TCN
     in_units=train_ds.num_units,
