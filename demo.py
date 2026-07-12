@@ -7,6 +7,19 @@
 #
 
 # %% [markdown]
+# ::: {.callout-note title="A small, fast-to-run example, built to scale"}
+# This tutorial deliberately stays small. It runs on a **single session** and
+# is meant as a toy example you can run end-to-end in minutes, on modest
+# hardware, with no large downloads or long training (a free Colab GPU is more
+# than enough). That keeps the moving parts easy to follow.
+#
+# The real payoff from `torch-brain` comes **at scale**, across many sessions,
+# animals, and brain regions. The pipeline you build here is exactly the one
+# you scale up: once it works on one session, pointing it at as many sessions
+# as you want takes minimal extra effort.
+# :::
+
+# %% [markdown]
 # ::: {.content-hidden when-format="html"}
 # > ### ⚠️ Running on Google Colab?
 # >
