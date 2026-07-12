@@ -179,6 +179,7 @@ BATCH_SIZE = 64
 EPOCHS = 100
 LR = 3e-3
 SEED = 0  # for a reproducible score
+NUM_WORKERS = 2  # DataLoader workers (Colab has ~2 vCPUs); 0 = main process
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -1141,7 +1142,14 @@ train_sampler = TrialSampler(
     sampling_intervals=train_ds.get_sampling_intervals(), shuffle=True
 )
 
-train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=train_sampler)
+# Workers prefetch/bin the next batch while the GPU trains; persistent = kept across epochs.
+train_loader = DataLoader(
+    train_ds,
+    batch_size=BATCH_SIZE,
+    sampler=train_sampler,
+    num_workers=NUM_WORKERS,
+    persistent_workers=NUM_WORKERS > 0,
+)
 
 # Validation Dataset, Sampler, and DataLoader
 val_ds = IBLBrainWideMap2025(
@@ -1150,7 +1158,13 @@ val_ds = IBLBrainWideMap2025(
 val_sampler = TrialSampler(
     sampling_intervals=val_ds.get_sampling_intervals(), shuffle=False
 )
-val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, sampler=val_sampler)
+val_loader = DataLoader(
+    val_ds,
+    batch_size=BATCH_SIZE,
+    sampler=val_sampler,
+    num_workers=NUM_WORKERS,
+    persistent_workers=NUM_WORKERS > 0,
+)
 
 
 # Test Dataset, Sampler, and DataLoader.
@@ -1160,7 +1174,13 @@ test_ds = IBLBrainWideMap2025(
 test_sampler = TrialSampler(
     sampling_intervals=test_ds.get_sampling_intervals(), shuffle=False
 )
-test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, sampler=test_sampler)
+# Single pass, so no persistent_workers.
+test_loader = DataLoader(
+    test_ds,
+    batch_size=BATCH_SIZE,
+    sampler=test_sampler,
+    num_workers=NUM_WORKERS,
+)
 
 # %%
 print(f"Number of units: {train_ds.num_units}")
