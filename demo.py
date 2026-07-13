@@ -29,12 +29,13 @@
 # :::
 
 # %% [markdown]
-# This tutorial walks you through a minimal training pipeline for **decoding
+# This tutorial walks you through a minimal, end-to-end pipeline for **decoding
 # behavior** from spiking activity recorded in the **mouse brain with
-# Neuropixels probes**, using a single session of the IBL Brain-Wide Map. Each
-# session records several behavioral signals on a shared clock (wheel motion,
-# whisker motion energy, and paw positions/speeds), any of which can be a
-# decoding target.
+# Neuropixels probes**, using a single session of the IBL Brain-Wide Map: you
+# build a `Dataset` from one recording, sample trial-aligned windows from it,
+# and train a few small decoders on the result. Each session records several
+# behavioral signals on a shared clock (wheel motion, whisker motion energy, and
+# paw positions/speeds), any of which can be a decoding target.
 #
 # <!-- TODO: check how many Neuropixels probes were inserted for this session -->
 #
@@ -51,16 +52,14 @@
 # [🐍 ONE API](https://int-brain-lab.github.io/ONE/){.btn .btn-outline-primary .btn-sm target="_blank"}
 # [🧠 Interactive viz](https://viz.internationalbrainlab.org){.btn .btn-outline-primary .btn-sm target="_blank"}
 #
-# By working through this tutorial, you will learn how to:
+# By working through this tutorial, you will:
 #
-# 1. Build a custom `Dataset` on top of a `brainsets` recording, so any
-#    pre-processed session becomes trainable with a few lines of code.
-# 2. Sample fixed-length trials around a decision-making task using
-#    `TrialSampler`, the standard pattern for turning a continuous recording
-#    into training examples.
-# 3. Train and compare three small decoders (a linear readout, a bidirectional
-#    GRU, and a dilated TCN) on the same data pipeline, so you can see how
-#    architecture choice alone affects decoding performance.
+# 1. **Build a custom `Dataset`** on a `brainsets` recording, turning any
+#    pre-processed session into trainable `(X, y)` samples in a few lines.
+# 2. **Sample trial-aligned windows** with `TrialSampler`, the standard way to
+#    turn a continuous recording into training examples.
+# 3. **Train and compare three decoders** (linear, GRU, dilated TCN) on that one
+#    pipeline, isolating how architecture alone affects decoding.
 #
 
 # %% [markdown]
