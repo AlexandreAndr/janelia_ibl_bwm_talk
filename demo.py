@@ -40,11 +40,11 @@
 # <!-- TODO: check how many Neuropixels probes were inserted for this session -->
 #
 # As a concrete, end-to-end example we decode **whisker motion energy** (a 1D
-# continuous signal sampled at 50 Hz). Treat it as an interactive starting
-# point: the
-# **Hands On** section lets you swap in another behavioral covariate as the
-# decoding target, and can be extended further using the composable transforms
-# shown in the appendix.
+# continuous signal sampled at 50 Hz) with a simple **linear decoder**. Treat it
+# as an interactive starting point: the **Hands On** section lets you tune the
+# pipeline (the spike **bin size**) and **swap in more expressive models** (a GRU
+# or a dilated TCN) to try to beat that linear baseline, and can be extended
+# further using the composable transforms shown in the appendix.
 #
 # The data comes from the IBL Brain-Wide Map:
 #
@@ -58,8 +58,9 @@
 #    pre-processed session into trainable `(X, y)` samples in a few lines.
 # 2. **Sample trial-aligned windows** with `TrialSampler`, the standard way to
 #    turn a continuous recording into training examples.
-# 3. **Train and compare three decoders** (linear, GRU, dilated TCN) on that one
-#    pipeline, isolating how architecture alone affects decoding.
+# 3. **Train a linear decoder end to end** on that pipeline, then (in **Hands
+#    On**) tune the bin size and swap in a GRU or dilated TCN to see how the
+#    pipeline and the architecture each affect decoding.
 #
 
 # %% [markdown]
@@ -1589,6 +1590,11 @@ class TCN(nn.Module):
 
 # %% [markdown]
 # ## Instantiating the model
+#
+# We train the **linear** decoder as our baseline: it is the simplest of the
+# three, trains in seconds, and is the easiest to interpret. The `GRU` and `TCN`
+# above stay defined but unused for now, they are what you swap in during **Hands
+# On** to try to beat this baseline.
 
 # %%
 #| code-fold: show
@@ -1596,13 +1602,11 @@ class TCN(nn.Module):
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 
-model = TCN(  # try: Linear, GRU, TCN
+model = Linear(  # the baseline we train end to end; swap for GRU / TCN in "Hands On"
     in_units=train_ds.num_units,
     in_bins=train_ds.num_bins,
     out_dim=train_ds.out_dim,
     out_samples=train_ds.out_samples,
-    hidden_dim=16,
-    num_layers=2,
 ).to(device)
 
 num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1752,64 +1756,137 @@ plt.show()
 
 
 # %% [markdown]
-# # Hands On: Decode a Different Covariate
+# # Hands On: Tune the Pipeline and Swap the Model
 #
-# Now it's your turn. Everything you need is already defined above: the dataset
-# class, the samplers, and the training loop. This exercise focuses on the one
-# piece that changes when you decode a new signal: **what `__getitem__` returns
-# as `Y`**.
+# Now it's your turn. The linear decoder above is a deliberately simple, honest
+# baseline: it decodes real signal (test R² well above zero) but is far from
+# perfect, and it runs at a `BIN_SIZE`/`LR` that are reasonable but **not
+# tuned**. That leaves plenty of headroom. Everything you need is already defined
+# above, the `IBLBrainWideMap2025` dataset, the three model classes, and the
+# training loop, so this exercise changes only two things, one at a time, and
+# asks what each does to **test** R² (generalization), not just validation R².
 #
-# **Goal:** instead of whisker motion energy, decode one of the other covariates
-# recorded in this session: `wheel.speed`, `paws.left_paw_speed`, or
-# `paws.right_paw_speed`.
+# **Three knobs to play with:**
 #
-# **Steps:**
-# 1. Pick a covariate from the list above.
-# 2. Subclass `IBLBrainWideMap2025` (skeleton below) and point `Y` at your
-#    chosen covariate instead of `data.whisker.motion_energy`.
-# 3. Instantiate train/val/test datasets, samplers, and loaders for your new
-#    class, exactly as in "Creating the Datasets, Samplers, and DataLoaders".
-# 4. Re-run the training loop on a fresh model instance, and compare its
-#    validation R² to whisker motion energy's.
+# 1. **Bin size.** `BIN_SIZE` sets how finely spikes are counted in time, and so
+#    how many input bins the model sees. Finer bins give the model more temporal
+#    detail but more parameters to fit; coarser bins do the opposite. Rebuild the
+#    datasets/loaders with a new `bin_size` and retrain. Is there a sweet spot?
+# 2. **Model architecture (and its size).** Swap the `Linear` baseline for the
+#    `GRU` or `TCN` defined above, keeping the data pipeline identical, so the
+#    only thing that changes is the model. For those two you can also set their
+#    **width** (`hidden_dim`) and **depth** (`num_layers`): wider/deeper fits
+#    more, but risks overfitting the short training block. (`Linear` is a single
+#    flat layer, so it has neither.) Can a bigger model beat the linear baseline
+#    on the held-out test block?
+# 3. **Learning rate.** `LR` controls how large each optimizer step is. Too high
+#    and training overshoots (and can fit the training block in a way that fails
+#    to generalize); too low and it crawls. Watch what it does to the val↔test
+#    gap, not just to the validation R².
 #
-# This is a self-check: if your new covariate trains and its R² is in a
-# plausible range, your subclass is wired correctly. If you want to go further,
-# this is also the natural place to try the transforms from the appendix below
-# (a finer bin size, a longer context window, unit dropout, ...) on your new
-# target.
+# **What to watch:** a change can raise *validation* R² while *lowering* test R².
+# That gap is the whole point of the causal split, so we report the **test** R²
+# of the **best-validation** checkpoint and treat that as the honest score.
 #
+# The helper below wraps exactly the pipeline you built above (dataset ->
+# sampler -> loader -> train -> score the best-val checkpoint on test). Change
+# the knobs below, re-run, and compare to the linear baseline.
 
 
 # %%
-class IBLCovariateDataset(IBLBrainWideMap2025):
-    """Same as IBLBrainWideMap2025, but decodes `namespace.attr` instead of whisker motion energy."""
-
-    def __init__(self, *args, namespace: str, attr: str, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.namespace = namespace
-        self.attr = attr
-
-    def __getitem__(self, index):
-        recording = self.get_recording(index.recording_id)
-        data = recording.slice(index.start, index.end)
-
-        X = bin_spikes(data.spikes, num_units=len(data.units), bin_size=self.bin_size)
-        X = torch.from_numpy(X).float()
-
-        # TODO: read your chosen covariate instead of the whisker motion energy, e.g.
-        # Y = np.asarray(getattr(getattr(data, self.namespace), self.attr), dtype=np.float32)
-        Y = np.asarray(data.whisker.motion_energy, dtype=np.float32)  # <-- replace this line
-        Y = torch.from_numpy(Y).unsqueeze(-1)
-
-        return X, Y
+#| code-fold: show
+import copy
 
 
-# TODO: pick a covariate to decode
-NAMESPACE = "wheel"  # try: "wheel", "paws"
-ATTR = "speed"  # try: "speed", "left_paw_speed", "right_paw_speed"
+def build_loaders(bin_size):
+    """Rebuild train/val/test loaders for a given bin size (same pattern as above)."""
+    datasets, loaders = {}, {}
+    for split, shuffle in (("train", True), ("val", False), ("test", False)):
+        ds = IBLBrainWideMap2025(
+            DATA_ROOT, split=split, bin_size=bin_size, recording_id=RECORDING_ID
+        )
+        sampler = TrialSampler(
+            sampling_intervals=ds.get_sampling_intervals(), shuffle=shuffle
+        )
+        datasets[split] = ds
+        loaders[split] = DataLoader(
+            ds, batch_size=BATCH_SIZE, sampler=sampler, num_workers=NUM_WORKERS
+        )
+    return datasets, loaders
 
-# TODO: build train/val/test IBLCovariateDataset instances (passing
-# namespace=NAMESPACE, attr=ATTR), wrap each in a TrialSampler + DataLoader
-# (same pattern as "Creating the Datasets, Samplers, and DataLoaders" above),
-# then re-run the training loop on a fresh model instance and compare its
-# validation R² to whisker motion energy's.
+
+def train_and_score(model_class, bin_size=BIN_SIZE, lr=LR, epochs=EPOCHS, **model_kwargs):
+    """Train `model_class` end to end; return (best val R², test R² at that checkpoint).
+
+    Extra `model_kwargs` (e.g. hidden_dim / num_layers for GRU and TCN) are
+    forwarded to the model constructor; Linear takes none.
+    """
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
+    datasets, loaders = build_loaders(bin_size)
+    ds = datasets["train"]
+
+    # Every model shares the same interface, so only the class name (and its
+    # optional width/depth) changes here.
+    model = model_class(
+        in_units=ds.num_units,
+        in_bins=ds.num_bins,
+        out_dim=ds.out_dim,
+        out_samples=ds.out_samples,
+        **model_kwargs,
+    ).to(device)
+    optim = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    def score(loader):
+        model.eval()
+        preds, targets = [], []
+        with torch.no_grad():
+            for X, Y in loader:
+                preds.append(model(X.to(device)))
+                targets.append(Y.to(device))
+        p = torch.cat(preds).flatten(0, 1).cpu()
+        t = torch.cat(targets).flatten(0, 1).cpu()
+        return r2_score(t, p)
+
+    best_val, best_state = -float("inf"), None
+    for _epoch in (pbar := tqdm(range(epochs))):
+        model.train()
+        for X, Y in loaders["train"]:
+            X, Y = X.to(device), Y.to(device)
+            loss = nn.functional.mse_loss(model(X), Y)
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
+        val_r2 = score(loaders["val"])
+        if val_r2 > best_val:  # remember the best-validation checkpoint
+            best_val = val_r2
+            best_state = copy.deepcopy(model.state_dict())
+        pbar.set_description(f"Val R²: {val_r2:.3f}")
+
+    model.load_state_dict(best_state)  # score that checkpoint, not the last epoch
+    return best_val, score(loaders["test"])
+
+
+# TODO: change these (one at a time) and re-run to compare to the baseline.
+MODEL_CLASS = Linear  # try: Linear, GRU, TCN
+HANDS_ON_BIN_SIZE = BIN_SIZE  # try: 0.1, 0.05, 0.02, 0.01
+HANDS_ON_LR = LR  # try: 1e-2, 3e-3, 1e-3, 3e-4
+
+# Width and depth of the GRU / TCN. Linear has neither, so they are only passed
+# when you pick GRU or TCN above.
+HIDDEN_DIM = 64  # width -> try: 16, 32, 64, 128
+NUM_LAYERS = 2  # depth -> try: 1, 2, 4
+size_kwargs = (
+    {} if MODEL_CLASS is Linear else dict(hidden_dim=HIDDEN_DIM, num_layers=NUM_LAYERS)
+)
+
+best_val_r2, test_r2 = train_and_score(
+    MODEL_CLASS, bin_size=HANDS_ON_BIN_SIZE, lr=HANDS_ON_LR, **size_kwargs
+)
+print(
+    f"{MODEL_CLASS.__name__}  (bin_size={HANDS_ON_BIN_SIZE}s, lr={HANDS_ON_LR}"
+    + (f", hidden_dim={HIDDEN_DIM}, num_layers={NUM_LAYERS}" if size_kwargs else "")
+    + ")"
+)
+print(f"  best validation R²:        {best_val_r2:.3f}")
+print(f"  test R² (that checkpoint): {test_r2:.3f}")
