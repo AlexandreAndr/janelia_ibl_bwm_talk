@@ -1601,7 +1601,7 @@ model = TCN(  # try: Linear, GRU, TCN
     in_bins=train_ds.num_bins,
     out_dim=train_ds.out_dim,
     out_samples=train_ds.out_samples,
-    hidden_dim=16,  # a small, shallow TCN validates best here (best val R²)
+    hidden_dim=16,
     num_layers=2,
 ).to(device)
 
