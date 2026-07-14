@@ -178,15 +178,35 @@ if not os.path.exists(_session_path):
     os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "30"
     os.environ["HF_HUB_DISABLE_XET"] = "1"
 
+    # Use a token if one is available (higher rate limit), but fall back to
+    # anonymous access so the notebook still works for anyone who copies it.
+    try:
+        from google.colab import userdata
+
+        _tok = userdata.get("HF_TOKEN")
+        if _tok:
+            os.environ["HF_TOKEN"] = _tok
+    except Exception:
+        pass
+
     from huggingface_hub import hf_hub_download
 
     os.makedirs(os.path.dirname(_session_path), exist_ok=True)
-    hf_hub_download(
-        repo_id="AlexAndreUpenn/neuro-data-re-hack-ibl-torch-brain-demo",
-        repo_type="dataset",
-        filename=f"{RECORDING_ID}.h5",
-        local_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
-    )
+    _n_attempts = 5
+    for _attempt in range(1, _n_attempts + 1):
+        try:
+            hf_hub_download(
+                repo_id="AlexAndreUpenn/neuro-data-re-hack-ibl-torch-brain-demo",
+                repo_type="dataset",
+                filename=f"{RECORDING_ID}.h5",
+                local_dir=os.path.join(DATA_ROOT, DATASET_DIRNAME),
+            )
+            break
+        except Exception as _err:
+            print(f"Download attempt {_attempt}/{_n_attempts} failed: {_err}")
+            if _attempt == _n_attempts:
+                raise
+            print("Retrying (resumes from the partial file)...")
 
 # %% [markdown]
 # Imports used throughout this tutorial.
