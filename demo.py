@@ -139,6 +139,7 @@ if IN_COLAB:
             "torch_brain @ git+https://github.com/neuro-galaxy/torch_brain.git@deb39f026da33a93f9a95884eda82c1aa60dcd1a",
             "tqdm",
             "huggingface_hub",
+            "hf_xet",
             "bokeh",
         ],
         check=True,
