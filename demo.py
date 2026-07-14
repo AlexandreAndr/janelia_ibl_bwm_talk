@@ -853,7 +853,7 @@ print(
 # Hyperparameters (feel free to play with these)
 BIN_SIZE = 0.05  # seconds -> 20 spike bins over the 1.0 s context window
 BATCH_SIZE = 64
-EPOCHS = 100
+EPOCHS = 50
 LR = 3e-3
 SEED = 0  # for a reproducible score
 NUM_WORKERS = 2  # DataLoader workers (Colab has ~2 vCPUs); 0 = main process
@@ -1622,8 +1622,9 @@ print(model)
 # %% [markdown]
 # ## Training
 #
-# A standard PyTorch loop: MSE loss against the whisker motion energy, AdamW optimizer,
-# R² score on the validation set at the end of each epoch.
+# A standard PyTorch loop: MSE loss against the whisker motion energy, AdamW
+# optimizer, recording the mean training loss and the validation R² at the end
+# of each epoch (so we can plot both curves below).
 
 # %%
 #| code-fold: show
@@ -1631,10 +1632,12 @@ from sklearn.metrics import r2_score
 
 optim = torch.optim.AdamW(model.parameters(), lr=LR)
 
+train_loss_history = []
 val_r2_history = []
 
 for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
     model.train()
+    epoch_losses = []
     for X, Y in train_loader:
         X, Y = X.to(device), Y.to(device)
         pred = model(X)
@@ -1642,6 +1645,8 @@ for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
         optim.zero_grad()
         loss.backward()
         optim.step()
+        epoch_losses.append(loss.item())
+    train_loss_history.append(float(np.mean(epoch_losses)))
 
     with torch.no_grad():
         model.eval()
@@ -1659,18 +1664,44 @@ for _epoch in (epoch_pbar := tqdm(range(EPOCHS))):
 # %% [markdown]
 # ## Evaluation
 #
-# Plot the R² curve over training and compare predicted vs. actual whisker motion
-# energy on several validation trials.
+# Plot the training loss and the validation R² over training (side by side),
+# then compare predicted vs. actual whisker motion energy on several validation
+# trials.
 
 # %%
-fig, ax = plt.subplots(figsize=(6, 3))
-ax.plot(val_r2_history)
-ax.set_xlabel("Epoch")
-ax.set_ylabel("Validation R²")
-ax.set_title("Validation R² over training")
-ax.grid(alpha=0.3)
-plt.tight_layout()
-plt.show()
+#| code-fold: show
+def plot_curves(train_loss_history, val_r2_history, title=None):
+    """Two panels over epochs: training loss (MSE) and validation R².
+
+    The validation R² axis is floored at -1: early in training R² can plunge far
+    below zero (an untrained model is worse than just predicting the mean, which
+    is R²=0), and clipping keeps the meaningful range legible. The top is the
+    best value reached, and a dashed line marks R²=0 (the predict-the-mean line).
+    """
+    fig, (ax_loss, ax_r2) = plt.subplots(1, 2, figsize=(11, 3.5))
+
+    ax_loss.plot(train_loss_history, color="C1")
+    ax_loss.set_xlabel("Epoch")
+    ax_loss.set_ylabel("Training loss (MSE)")
+    ax_loss.set_title("Training loss over training")
+    ax_loss.grid(alpha=0.3)
+
+    ax_r2.plot(val_r2_history, color="C0")
+    ax_r2.axhline(0.0, color="gray", lw=1, ls="--")  # R²=0: predicting the mean
+    ax_r2.set_xlabel("Epoch")
+    ax_r2.set_ylabel("Validation R²")
+    ax_r2.set_title("Validation R² over training")
+    top = max(val_r2_history)
+    ax_r2.set_ylim(-1.0, top if top > -1.0 else 1.0)
+    ax_r2.grid(alpha=0.3)
+
+    if title:
+        fig.suptitle(title)
+    plt.tight_layout()
+    plt.show()
+
+
+plot_curves(train_loss_history, val_r2_history)
 
 # %% [markdown]
 # Let's look at examples of how our model's predictions compare with the ground
@@ -1815,10 +1846,12 @@ def build_loaders(bin_size):
 
 
 def train_and_score(model_class, bin_size=BIN_SIZE, lr=LR, epochs=EPOCHS, **model_kwargs):
-    """Train `model_class` end to end; return (best val R², test R² at that checkpoint).
+    """Train `model_class` end to end.
 
-    Extra `model_kwargs` (e.g. hidden_dim / num_layers for GRU and TCN) are
-    forwarded to the model constructor; Linear takes none.
+    Returns (best val R², test R² at that checkpoint, training-loss history,
+    validation-R² history), so the caller can plot the same curves as the
+    baseline above. Extra `model_kwargs` (e.g. hidden_dim / num_layers for GRU
+    and TCN) are forwarded to the model constructor; Linear takes none.
     """
     torch.manual_seed(SEED)
     np.random.seed(SEED)
@@ -1847,23 +1880,28 @@ def train_and_score(model_class, bin_size=BIN_SIZE, lr=LR, epochs=EPOCHS, **mode
         t = torch.cat(targets).flatten(0, 1).cpu()
         return r2_score(t, p)
 
+    train_loss_history, val_r2_history = [], []
     best_val, best_state = -float("inf"), None
     for _epoch in (pbar := tqdm(range(epochs))):
         model.train()
+        epoch_losses = []
         for X, Y in loaders["train"]:
             X, Y = X.to(device), Y.to(device)
             loss = nn.functional.mse_loss(model(X), Y)
             optim.zero_grad()
             loss.backward()
             optim.step()
+            epoch_losses.append(loss.item())
+        train_loss_history.append(float(np.mean(epoch_losses)))
         val_r2 = score(loaders["val"])
+        val_r2_history.append(val_r2)
         if val_r2 > best_val:  # remember the best-validation checkpoint
             best_val = val_r2
             best_state = copy.deepcopy(model.state_dict())
         pbar.set_description(f"Val R²: {val_r2:.3f}")
 
     model.load_state_dict(best_state)  # score that checkpoint, not the last epoch
-    return best_val, score(loaders["test"])
+    return best_val, score(loaders["test"]), train_loss_history, val_r2_history
 
 
 # ======================================================================
@@ -1873,6 +1911,7 @@ def train_and_score(model_class, bin_size=BIN_SIZE, lr=LR, epochs=EPOCHS, **mode
 MODEL_CLASS = Linear  # try: Linear, GRU, TCN
 HANDS_ON_BIN_SIZE = BIN_SIZE  # try: 0.1, 0.05, 0.02, 0.01
 HANDS_ON_LR = LR  # try: 1e-2, 3e-3, 1e-3, 3e-4
+HANDS_ON_EPOCHS = EPOCHS  # try: 25, 50, 100, 200
 
 # Width and depth of the GRU / TCN. Linear has neither, so they are only passed
 # when you pick GRU or TCN above.
@@ -1885,13 +1924,22 @@ size_kwargs = (
     {} if MODEL_CLASS is Linear else dict(hidden_dim=HIDDEN_DIM, num_layers=NUM_LAYERS)
 )
 
-best_val_r2, test_r2 = train_and_score(
-    MODEL_CLASS, bin_size=HANDS_ON_BIN_SIZE, lr=HANDS_ON_LR, **size_kwargs
+best_val_r2, test_r2, hist_loss, hist_val = train_and_score(
+    MODEL_CLASS,
+    bin_size=HANDS_ON_BIN_SIZE,
+    lr=HANDS_ON_LR,
+    epochs=HANDS_ON_EPOCHS,
+    **size_kwargs,
 )
-print(
-    f"{MODEL_CLASS.__name__}  (bin_size={HANDS_ON_BIN_SIZE}s, lr={HANDS_ON_LR}"
+config_label = (
+    f"{MODEL_CLASS.__name__}  (bin_size={HANDS_ON_BIN_SIZE}s, lr={HANDS_ON_LR}, "
+    f"epochs={HANDS_ON_EPOCHS}"
     + (f", hidden_dim={HIDDEN_DIM}, num_layers={NUM_LAYERS}" if size_kwargs else "")
     + ")"
 )
+print(config_label)
 print(f"  best validation R²:        {best_val_r2:.3f}")
 print(f"  test R² (that checkpoint): {test_r2:.3f}")
+
+# Same two-panel curves as the linear baseline above, for this hands-on run.
+plot_curves(hist_loss, hist_val, title=config_label)
