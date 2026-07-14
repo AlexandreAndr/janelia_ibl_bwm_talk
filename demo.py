@@ -175,6 +175,9 @@ RECORDING_ID = "0802ced5-33a3-405e-8336-b65ebc5cb07c"
 # this folder's README.
 _session_path = os.path.join(DATA_ROOT, DATASET_DIRNAME, f"{RECORDING_ID}.h5")
 if not os.path.exists(_session_path):
+    os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "30"
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+
     from huggingface_hub import hf_hub_download
 
     os.makedirs(os.path.dirname(_session_path), exist_ok=True)
