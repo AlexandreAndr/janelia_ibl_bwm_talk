@@ -43,8 +43,7 @@
 # continuous signal sampled at 50 Hz) with a simple **linear decoder**. Treat it
 # as an interactive starting point: the **Hands On** section lets you tune the
 # pipeline (the spike **bin size**) and **swap in more expressive models** (a GRU
-# or a dilated TCN) to try to beat that linear baseline, and can be extended
-# further using the composable transforms shown in the appendix.
+# or a dilated TCN) to try to beat that linear baseline.
 #
 # The data comes from the IBL Brain-Wide Map:
 #
@@ -1867,7 +1866,10 @@ def train_and_score(model_class, bin_size=BIN_SIZE, lr=LR, epochs=EPOCHS, **mode
     return best_val, score(loaders["test"])
 
 
-# TODO: change these (one at a time) and re-run to compare to the baseline.
+# ======================================================================
+# 👇 THIS IS THE BLOCK TO EDIT 👇
+# Change ONE value at a time, re-run this cell, and compare to the baseline.
+# ======================================================================
 MODEL_CLASS = Linear  # try: Linear, GRU, TCN
 HANDS_ON_BIN_SIZE = BIN_SIZE  # try: 0.1, 0.05, 0.02, 0.01
 HANDS_ON_LR = LR  # try: 1e-2, 3e-3, 1e-3, 3e-4
@@ -1876,6 +1878,9 @@ HANDS_ON_LR = LR  # try: 1e-2, 3e-3, 1e-3, 3e-4
 # when you pick GRU or TCN above.
 HIDDEN_DIM = 64  # width -> try: 16, 32, 64, 128
 NUM_LAYERS = 2  # depth -> try: 1, 2, 4
+# ======================================================================
+# 👆 STOP EDITING HERE 👆  (everything below just runs training + plots)
+# ======================================================================
 size_kwargs = (
     {} if MODEL_CLASS is Linear else dict(hidden_dim=HIDDEN_DIM, num_layers=NUM_LAYERS)
 )
